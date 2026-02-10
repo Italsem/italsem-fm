@@ -1,0 +1,11 @@
+name = "italsem-fm"
+compatibility_date = "2026-02-10"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "italsem_fm"
+database_id = "7a10a930-8cea-4ebe-be78-94587f7dab9f"
+
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "italsem-fm-photos"
