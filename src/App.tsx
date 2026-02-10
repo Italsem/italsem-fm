@@ -1,76 +1,102 @@
 import { useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 
 type Vehicle = {
   id: number;
   plate: string;
   name: string | null;
-  type: string | null;
-  notes: string | null;
-  photo_key: string | null;
-  photo_url: string | null;
 };
 
-type VehiclesResponse = { ok: boolean; data: Vehicle[] };
 type ImportResult = {
   ok: boolean;
   totalSheets?: number;
   detectedPlates?: number;
   inserted?: number;
   skipped?: number;
-  plates?: string[];
   error?: string;
 };
 
-async function loadVehicles(): Promise<Vehicle[]> {
+async function fetchVehicles(): Promise<Vehicle[]> {
   const res = await fetch("/api/vehicles");
-  const data = (await res.json()) as VehiclesResponse;
+  const data = await res.json();
   if (!res.ok || !data.ok) throw new Error("Errore caricamento mezzi");
   return data.data || [];
 }
 
+function isLikelyPlate(name: string) {
+  const s = name.trim().toUpperCase();
+  const blacklist = ["SCHEDA", "TEMPLATE", "FOGLIO", "NOTE", "RIEPILOGO"];
+  if (blacklist.some((b) => s.includes(b))) return false;
+  return /^[A-Z]{2}\d{3}[A-Z]{2}$/.test(s);
+}
+
 export default function App() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
 
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
 
   useEffect(() => {
-    (async () => {
-      try {
-        setVehicles(await loadVehicles());
-      } finally {
-        setLoading(false);
-      }
-    })();
+    load();
   }, []);
+
+  async function load() {
+    setLoading(true);
+    try {
+      setVehicles(await fetchVehicles());
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase();
     if (!q) return vehicles;
     return vehicles.filter(
-      (v) => v.plate.includes(q) || (v.name || "").toUpperCase().includes(q)
+      (v) =>
+        v.plate.includes(q) ||
+        (v.name || "").toUpperCase().includes(q)
     );
   }, [vehicles, search]);
 
   async function onImportExcel(file: File) {
     setImporting(true);
     setImportResult(null);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
 
-      const res = await fetch("/api/import/vehicles-excel", {
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+
+      const plates = wb.SheetNames
+        .map((n) => n.trim().toUpperCase())
+        .filter(isLikelyPlate);
+
+      if (plates.length === 0) {
+        throw new Error("Nessuna targa trovata nei nomi dei fogli.");
+      }
+
+      const res = await fetch("/api/vehicles-bulk", {
         method: "POST",
-        body: fd,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plates }),
       });
 
-      const data = (await res.json()) as ImportResult;
-      if (!res.ok || !data.ok) throw new Error(data.error || "Import fallito");
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data?.error || "Import fallito");
+      }
 
-      setImportResult(data);
-      setVehicles(await loadVehicles());
+      setImportResult({
+        ok: true,
+        totalSheets: wb.SheetNames.length,
+        detectedPlates: plates.length,
+        inserted: data.inserted,
+        skipped: data.skipped,
+      });
+
+      await load();
     } catch (e: any) {
       setImportResult({ ok: false, error: e?.message || "Errore" });
     } finally {
@@ -86,14 +112,14 @@ export default function App() {
       >
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <div>
-            <div className="text-lg font-semibold leading-tight">Italsem FM</div>
+            <div className="text-lg font-semibold">Italsem FM</div>
             <div className="text-sm" style={{ color: "var(--muted)" }}>
-              Import targhe + lista mezzi
+              Import targhe da Excel
             </div>
           </div>
 
           <label
-            className="inline-flex cursor-pointer items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold"
+            className="cursor-pointer rounded-xl px-4 py-2 text-sm font-semibold"
             style={{ background: "var(--accent)", color: "#111" }}
           >
             {importing ? "Import..." : "📥 Importa Excel"}
@@ -118,12 +144,7 @@ export default function App() {
           style={{ background: "var(--card)", borderColor: "var(--border)" }}
         >
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h1 className="text-xl font-semibold">Mezzi</h1>
-              <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
-                Carica l’Excel: i nomi dei fogli vengono salvati come targhe.
-              </p>
-            </div>
+            <h1 className="text-xl font-semibold">Mezzi</h1>
 
             <input
               placeholder="Cerca targa o nome..."
@@ -140,29 +161,30 @@ export default function App() {
 
           {importResult && (
             <div
-              className="mt-4 rounded-2xl border p-4 text-sm"
-              style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.02)" }}
+              className="mt-4 rounded-xl border p-3 text-sm"
+              style={{
+                borderColor: "var(--border)",
+                background: "rgba(255,255,255,0.03)",
+              }}
             >
               {importResult.ok ? (
                 <>
-                  <div className="font-semibold" style={{ color: "var(--accent)" }}>
+                  <div style={{ color: "var(--accent)" }}>
                     Import completato ✅
                   </div>
-                  <div className="mt-1" style={{ color: "var(--muted)" }}>
-                    Fogli: {importResult.totalSheets} — Targhe: {importResult.detectedPlates}
+                  <div>
+                    Fogli: {importResult.totalSheets} — Targhe:{" "}
+                    {importResult.detectedPlates}
                   </div>
-                  <div className="mt-1">
+                  <div>
                     Inserite: <b>{importResult.inserted}</b> — Già presenti:{" "}
                     <b>{importResult.skipped}</b>
                   </div>
                 </>
               ) : (
-                <>
-                  <div className="font-semibold text-red-300">Import fallito ❌</div>
-                  <div className="mt-1" style={{ color: "var(--muted)" }}>
-                    {importResult.error}
-                  </div>
-                </>
+                <div style={{ color: "#ff8a8a" }}>
+                  Import fallito ❌ — {importResult.error}
+                </div>
               )}
             </div>
           )}
@@ -180,17 +202,15 @@ export default function App() {
               filtered.map((v) => (
                 <div
                   key={v.id}
-                  className="flex items-center justify-between rounded-2xl border p-4"
-                  style={{ background: "rgba(255,255,255,0.02)", borderColor: "var(--border)" }}
+                  className="rounded-xl border p-3"
+                  style={{
+                    background: "rgba(255,255,255,0.02)",
+                    borderColor: "var(--border)",
+                  }}
                 >
-                  <div>
-                    <div className="font-semibold">{v.plate}</div>
-                    <div className="text-sm" style={{ color: "var(--muted)" }}>
-                      {v.name || "—"}
-                    </div>
-                  </div>
-                  <div className="text-xs" style={{ color: "var(--muted)" }}>
-                    id: {v.id}
+                  <div className="font-semibold">{v.plate}</div>
+                  <div className="text-sm" style={{ color: "var(--muted)" }}>
+                    {v.name || "—"}
                   </div>
                 </div>
               ))
