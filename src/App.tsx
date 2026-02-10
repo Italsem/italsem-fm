@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 
-type Vehicle = {
-  id: number;
-  plate: string;
-  name: string | null;
-};
+type Vehicle = { id: number; plate: string; name: string | null };
 
 type ImportResult = {
   ok: boolean;
@@ -16,11 +12,25 @@ type ImportResult = {
   error?: string;
 };
 
+async function readJsonSafe(res: Response) {
+  const text = await res.text();
+  let data: any = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    // non-JSON (es. HTML)
+  }
+  return { text, data };
+}
+
 async function fetchVehicles(): Promise<Vehicle[]> {
-  const res = await fetch("/api/vehicles");
-  const data = await res.json();
-  if (!res.ok || !data.ok) throw new Error("Errore caricamento mezzi");
-  return data.data || [];
+  const res = await fetch("/api/vehicles", { headers: { Accept: "application/json" } });
+  const { data, text } = await readJsonSafe(res);
+
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.error || `GET /api/vehicles failed (${res.status}) -> ${text.slice(0, 120)}`);
+  }
+  return (data.data || []) as Vehicle[];
 }
 
 function isLikelyPlate(name: string) {
@@ -39,27 +49,29 @@ export default function App() {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
 
   useEffect(() => {
-    load();
+    (async () => {
+      setLoading(true);
+      try {
+        setVehicles(await fetchVehicles());
+      } catch (e: any) {
+        setImportResult({ ok: false, error: e?.message || "Errore caricamento mezzi" });
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
-
-  async function load() {
-    setLoading(true);
-    try {
-      setVehicles(await fetchVehicles());
-    } finally {
-      setLoading(false);
-    }
-  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase();
     if (!q) return vehicles;
     return vehicles.filter(
-      (v) =>
-        v.plate.includes(q) ||
-        (v.name || "").toUpperCase().includes(q)
+      (v) => v.plate.includes(q) || (v.name || "").toUpperCase().includes(q)
     );
   }, [vehicles, search]);
+
+  async function reloadVehicles() {
+    setVehicles(await fetchVehicles());
+  }
 
   async function onImportExcel(file: File) {
     setImporting(true);
@@ -69,23 +81,25 @@ export default function App() {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
 
-      const plates = wb.SheetNames
-        .map((n) => n.trim().toUpperCase())
-        .filter(isLikelyPlate);
+      const plates = wb.SheetNames.map((n) => n.trim().toUpperCase()).filter(isLikelyPlate);
 
       if (plates.length === 0) {
-        throw new Error("Nessuna targa trovata nei nomi dei fogli.");
+        throw new Error("Nessuna targa trovata nei nomi dei fogli (formato atteso: AA123BB).");
       }
 
       const res = await fetch("/api/vehicles-bulk", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
         body: JSON.stringify({ plates }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data?.error || "Import fallito");
+      const { data, text } = await readJsonSafe(res);
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `POST /api/vehicles-bulk failed (${res.status}) -> ${text.slice(0, 120)}`);
       }
 
       setImportResult({
@@ -96,9 +110,9 @@ export default function App() {
         skipped: data.skipped,
       });
 
-      await load();
+      await reloadVehicles();
     } catch (e: any) {
-      setImportResult({ ok: false, error: e?.message || "Errore" });
+      setImportResult({ ok: false, error: e?.message || "Errore import" });
     } finally {
       setImporting(false);
     }
@@ -114,7 +128,7 @@ export default function App() {
           <div>
             <div className="text-lg font-semibold">Italsem FM</div>
             <div className="text-sm" style={{ color: "var(--muted)" }}>
-              Import targhe da Excel
+              Import targhe da Excel (nomi fogli)
             </div>
           </div>
 
@@ -162,28 +176,21 @@ export default function App() {
           {importResult && (
             <div
               className="mt-4 rounded-xl border p-3 text-sm"
-              style={{
-                borderColor: "var(--border)",
-                background: "rgba(255,255,255,0.03)",
-              }}
+              style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.03)" }}
             >
               {importResult.ok ? (
                 <>
-                  <div style={{ color: "var(--accent)" }}>
-                    Import completato ✅
+                  <div style={{ color: "var(--accent)" }}>Import completato ✅</div>
+                  <div>
+                    Fogli: {importResult.totalSheets} — Targhe rilevate: {importResult.detectedPlates}
                   </div>
                   <div>
-                    Fogli: {importResult.totalSheets} — Targhe:{" "}
-                    {importResult.detectedPlates}
-                  </div>
-                  <div>
-                    Inserite: <b>{importResult.inserted}</b> — Già presenti:{" "}
-                    <b>{importResult.skipped}</b>
+                    Inserite: <b>{importResult.inserted}</b> — Già presenti: <b>{importResult.skipped}</b>
                   </div>
                 </>
               ) : (
                 <div style={{ color: "#ff8a8a" }}>
-                  Import fallito ❌ — {importResult.error}
+                  Importazione fallita ❌ — {importResult.error}
                 </div>
               )}
             </div>
@@ -203,10 +210,7 @@ export default function App() {
                 <div
                   key={v.id}
                   className="rounded-xl border p-3"
-                  style={{
-                    background: "rgba(255,255,255,0.02)",
-                    borderColor: "var(--border)",
-                  }}
+                  style={{ background: "rgba(255,255,255,0.02)", borderColor: "var(--border)" }}
                 >
                   <div className="font-semibold">{v.plate}</div>
                   <div className="text-sm" style={{ color: "var(--muted)" }}>
