@@ -252,6 +252,8 @@ export default function App() {
               <button className="rounded bg-orange-500 px-3 py-2 font-semibold text-black md:col-span-2">Registra rifornimento</button>
             </form>
           )}
+        </section>
+      )}
 
           <div className="overflow-auto rounded-xl border border-slate-700 bg-slate-900 p-2">
             <table className="min-w-full text-sm">
