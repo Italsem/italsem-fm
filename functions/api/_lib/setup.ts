@@ -31,6 +31,41 @@ async function ensureVehicleColumns(db: D1Database) {
   `).run();
 }
 
+async function ensureFuelEventColumns(db: D1Database) {
+  const info = await db.prepare("PRAGMA table_info(fuel_events)").all<TableInfo>();
+  const cols = new Set((info.results || []).map((c) => c.name));
+
+  if (!cols.has("refuel_at")) {
+    await db.prepare("ALTER TABLE fuel_events ADD COLUMN refuel_at TEXT").run();
+  }
+  if (!cols.has("source_type")) {
+    await db.prepare("ALTER TABLE fuel_events ADD COLUMN source_type TEXT").run();
+  }
+  if (!cols.has("source_identifier")) {
+    await db.prepare("ALTER TABLE fuel_events ADD COLUMN source_identifier TEXT").run();
+  }
+  if (!cols.has("receipt_key")) {
+    await db.prepare("ALTER TABLE fuel_events ADD COLUMN receipt_key TEXT").run();
+  }
+  if (!cols.has("created_by")) {
+    await db.prepare("ALTER TABLE fuel_events ADD COLUMN created_by INTEGER DEFAULT 1").run();
+  }
+
+  const oldDateExpr = cols.has("date") ? "date" : "NULL";
+  const oldSourceExpr = cols.has("source") ? "source" : "NULL";
+  const oldStationExpr = cols.has("station") ? "station" : "NULL";
+  const oldSiteExpr = cols.has("site") ? "site" : "NULL";
+
+  await db.prepare(`
+    UPDATE fuel_events
+    SET
+      refuel_at = COALESCE(NULLIF(TRIM(refuel_at), ''), ${oldDateExpr}, datetime('now')),
+      source_type = COALESCE(NULLIF(TRIM(source_type), ''), ${oldSourceExpr}, 'card'),
+      source_identifier = COALESCE(NULLIF(TRIM(source_identifier), ''), NULLIF(TRIM(${oldStationExpr}), ''), NULLIF(TRIM(${oldSiteExpr}), ''), 'N/A'),
+      created_by = COALESCE(created_by, 1)
+  `).run();
+}
+
 export async function ensureCoreTables(db: D1Database) {
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS vehicles (
@@ -73,6 +108,8 @@ export async function ensureCoreTables(db: D1Database) {
       FOREIGN KEY(created_by) REFERENCES users(id)
     )
   `).run();
+
+  await ensureFuelEventColumns(db);
 
   const seeded = await db.prepare("SELECT COUNT(*) as count FROM fuel_sources").first<{ count: number }>();
   if (!seeded?.count) {
