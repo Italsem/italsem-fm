@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
   plate TEXT NOT NULL,
   model TEXT NOT NULL,
   description TEXT,
+  photo_key TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -33,7 +34,7 @@ CREATE TABLE IF NOT EXISTS fuel_sources (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS fuel_events (
+CREATE TABLE IF NOT EXISTS vehicles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   vehicle_id INTEGER NOT NULL,
   refuel_at TEXT NOT NULL,
@@ -50,3 +51,16 @@ CREATE TABLE IF NOT EXISTS fuel_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_refuel_vehicle_date ON fuel_events(vehicle_id, refuel_at);
+
+
+CREATE TABLE IF NOT EXISTS vehicle_deadlines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  vehicle_id INTEGER NOT NULL,
+  deadline_type TEXT NOT NULL,
+  due_date TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY(vehicle_id) REFERENCES vehicles(id),
+  UNIQUE(vehicle_id, deadline_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_deadlines_due ON vehicle_deadlines(due_date);

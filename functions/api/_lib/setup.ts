@@ -16,6 +16,9 @@ async function ensureVehicleColumns(db: D1Database) {
   if (!cols.has("active")) {
     await db.prepare("ALTER TABLE vehicles ADD COLUMN active INTEGER NOT NULL DEFAULT 1").run();
   }
+  if (!cols.has("photo_key")) {
+    await db.prepare("ALTER TABLE vehicles ADD COLUMN photo_key TEXT").run();
+  }
   if (!cols.has("created_at")) {
     await db.prepare("ALTER TABLE vehicles ADD COLUMN created_at TEXT DEFAULT (datetime('now'))").run();
   }
@@ -74,6 +77,7 @@ export async function ensureCoreTables(db: D1Database) {
       plate TEXT NOT NULL,
       model TEXT NOT NULL,
       description TEXT,
+      photo_key TEXT,
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
@@ -110,6 +114,20 @@ export async function ensureCoreTables(db: D1Database) {
   `).run();
 
   await ensureFuelEventColumns(db);
+
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS vehicle_deadlines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vehicle_id INTEGER NOT NULL,
+      deadline_type TEXT NOT NULL,
+      due_date TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY(vehicle_id) REFERENCES vehicles(id),
+      UNIQUE(vehicle_id, deadline_type)
+    )
+  `).run();
+
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_vehicle_deadlines_due ON vehicle_deadlines(due_date)").run();
 
   const seeded = await db.prepare("SELECT COUNT(*) as count FROM fuel_sources").first<{ count: number }>();
   if (!seeded?.count) {
