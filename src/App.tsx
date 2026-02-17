@@ -326,6 +326,7 @@ export default function App() {
           <button onClick={() => { localStorage.removeItem("token"); setToken(""); setUser(null); }} className="rounded bg-slate-700 px-3 py-1">Logout</button>
         </div>
       </header>
+      {error && <div className="rounded border border-red-700 bg-red-950 p-2 text-red-300">{error}</div>}
 
       {error && <div className="rounded border border-red-700 bg-red-950 p-2 text-red-300">{error}</div>}
 
