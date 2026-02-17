@@ -314,6 +314,27 @@ export default function App() {
           <button onClick={() => { localStorage.removeItem("token"); setToken(""); setUser(null); }} className="rounded bg-slate-700 px-3 py-1">Logout</button>
         </div>
       </header>
+      {error && <div className="rounded border border-red-700 bg-red-950 p-2 text-red-300">{error}</div>}
+
+      {tab === "dashboard" && dashboard && (
+        <section className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Litri totali: <b>{dashboard.totalLiters.toFixed(2)}</b></div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Spesa totale: <b>€ {dashboard.totalAmount.toFixed(2)}</b></div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Consumo medio: <b>{dashboard.avgConsumption.toFixed(2)} l/100km</b></div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+            <h3 className="font-semibold mb-2">Mezzi con consumi più alti</h3>
+            {dashboard.highConsumption.map((m) => <div key={m.code} className="text-sm">{m.code} {m.plate} • {m.avgConsumption.toFixed(2)} l/100km</div>)}
+          </div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+            <h3 className="font-semibold mb-2">Litri mensili</h3>
+            <MiniBars data={dashboard.monthly.map((m) => ({ label: m.month, value: m.liters }))} />
+          </div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+            <h3 className="font-semibold mb-2">Confronto consumi mezzi</h3>
+            <MiniBars data={dashboard.compare.map((c) => ({ label: `${c.code}/${c.plate}`, value: c.avgConsumption }))} />
+          </div>
+        </section>
+      )}
 
       {error && <div className="rounded border border-red-700 bg-red-950 p-2 text-red-300">{error}</div>}
 
@@ -422,6 +443,8 @@ export default function App() {
               <button className="rounded bg-orange-500 px-3 py-2 font-semibold text-black md:col-span-2">Registra rifornimento</button>
             </form>
           )}
+        </section>
+      )}
 
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 text-sm">
             Totale litri: <b>{reportStats.totalLiters.toFixed(2)}</b> • Spesa: <b>€ {reportStats.totalAmount.toFixed(2)}</b> • Consumo medio: <b>{reportStats.avgCons.toFixed(2)} l/100km</b>
