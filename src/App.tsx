@@ -39,9 +39,17 @@ async function api<T>(url: string, token: string, init?: RequestInit): Promise<T
     ...init,
     headers: { ...(init?.headers || {}), Authorization: `Bearer ${token}` },
   });
-  const data = await res.json();
-  if (!res.ok || !data.ok) throw new Error(data.error || "Errore API");
-  return data;
+
+  const raw = await res.text();
+  let data: { ok?: boolean; error?: string } | null = null;
+  try {
+    data = JSON.parse(raw) as { ok?: boolean; error?: string };
+  } catch {
+    throw new Error(`Risposta non JSON da ${url}: ${raw.slice(0, 160)}`);
+  }
+
+  if (!res.ok || !data?.ok) throw new Error(data?.error || `Errore API (${res.status})`);
+  return data as T;
 }
 
 function MiniBars({ data }: { data: Array<{ label: string; value: number }> }) {
@@ -109,8 +117,14 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(loginForm),
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error);
+      const raw = await res.text();
+      let data: { ok?: boolean; error?: string; token?: string } | null = null;
+      try {
+        data = JSON.parse(raw) as { ok?: boolean; error?: string; token?: string };
+      } catch {
+        throw new Error(`Risposta login non JSON: ${raw.slice(0, 160)}`);
+      }
+      if (!res.ok || !data.ok || !data.token) throw new Error(data?.error || "Login fallito");
       localStorage.setItem("token", data.token);
       setToken(data.token);
     } catch (e: unknown) {
@@ -151,8 +165,8 @@ export default function App() {
       <main className="min-h-screen p-6">
         <form onSubmit={onLogin} className="mx-auto mt-24 max-w-md rounded-xl border border-slate-700 bg-slate-900 p-6 text-left space-y-3">
           <h1 className="text-xl font-bold">Accesso</h1>
-          <input className="w-full rounded border border-slate-700 bg-slate-950 p-2" placeholder="Username" value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} />
-          <input type="password" className="w-full rounded border border-slate-700 bg-slate-950 p-2" placeholder="Password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} />
+          <input className="w-full rounded border border-slate-700 bg-slate-950 p-2" placeholder="Username" autoComplete="username" value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} />
+          <input type="password" className="w-full rounded border border-slate-700 bg-slate-950 p-2" placeholder="Password" autoComplete="current-password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} />
           <button className="rounded bg-orange-500 px-3 py-2 font-semibold text-black">Login</button>
           <p className="text-xs text-slate-400">Demo: admin/admin123, tecnico/tecnico123, contabilita/conta123</p>
           {error && <p className="text-sm text-red-400">{error}</p>}
@@ -238,6 +252,8 @@ export default function App() {
               <button className="rounded bg-orange-500 px-3 py-2 font-semibold text-black md:col-span-2">Registra rifornimento</button>
             </form>
           )}
+        </section>
+      )}
 
           <div className="overflow-auto rounded-xl border border-slate-700 bg-slate-900 p-2">
             <table className="min-w-full text-sm">

@@ -1,3 +1,36 @@
+type TableInfo = { name: string };
+
+async function ensureVehicleColumns(db: D1Database) {
+  const info = await db.prepare("PRAGMA table_info(vehicles)").all<TableInfo>();
+  const cols = new Set((info.results || []).map((c) => c.name));
+
+  if (!cols.has("code")) {
+    await db.prepare("ALTER TABLE vehicles ADD COLUMN code TEXT").run();
+  }
+  if (!cols.has("model")) {
+    await db.prepare("ALTER TABLE vehicles ADD COLUMN model TEXT").run();
+  }
+  if (!cols.has("description")) {
+    await db.prepare("ALTER TABLE vehicles ADD COLUMN description TEXT").run();
+  }
+  if (!cols.has("active")) {
+    await db.prepare("ALTER TABLE vehicles ADD COLUMN active INTEGER NOT NULL DEFAULT 1").run();
+  }
+  if (!cols.has("created_at")) {
+    await db.prepare("ALTER TABLE vehicles ADD COLUMN created_at TEXT DEFAULT (datetime('now'))").run();
+  }
+
+  const nameExpr = cols.has("name") ? "NULLIF(TRIM(name), '')" : "NULL";
+  await db.prepare(`
+    UPDATE vehicles
+    SET
+      code = COALESCE(NULLIF(TRIM(code), ''), UPPER(TRIM(plate))),
+      model = COALESCE(NULLIF(TRIM(model), ''), ${nameExpr}, 'Senza modello'),
+      description = COALESCE(NULLIF(TRIM(description), ''), ${nameExpr}),
+      active = COALESCE(active, 1)
+  `).run();
+}
+
 export async function ensureCoreTables(db: D1Database) {
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS vehicles (
@@ -10,6 +43,8 @@ export async function ensureCoreTables(db: D1Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `).run();
+
+  await ensureVehicleColumns(db);
 
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS fuel_sources (
