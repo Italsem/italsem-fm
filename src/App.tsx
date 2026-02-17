@@ -338,6 +338,8 @@ export default function App() {
 
       {error && <div className="rounded border border-red-700 bg-red-950 p-2 text-red-300">{error}</div>}
 
+      {error && <div className="rounded border border-red-700 bg-red-950 p-2 text-red-300">{error}</div>}
+
       {tab === "dashboard" && dashboard && (
         <section className="grid gap-4 md:grid-cols-2">
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Litri totali: <b>{dashboard.totalLiters.toFixed(2)}</b></div>

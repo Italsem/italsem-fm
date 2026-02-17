@@ -1,5 +1,6 @@
 name = "italsem-fm"
 compatibility_date = "2026-02-10"
+pages_build_output_dir = "dist"
 
 [[d1_databases]]
 binding = "DB"
