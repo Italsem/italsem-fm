@@ -1,73 +1,43 @@
-# React + TypeScript + Vite
+# Italsem FM
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Applicazione React + Cloudflare Pages Functions per la gestione rifornimenti, mezzi e report consumi.
 
-Currently, two official plugins are available:
+## Sviluppo locale
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm ci
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Build locale
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run build
+npm run lint
 ```
+
+## Deploy Cloudflare Pages
+
+Questa repo usa `wrangler.toml` con:
+
+- `pages_build_output_dir = "dist"`
+- build command: `npm run build`
+
+Se in Cloudflare compaiono errori TypeScript/JSX (es. `Expected corresponding JSX closing tag for 'main'`), verifica sempre che il deploy stia puntando all'**ultimo commit** che passa localmente `npm run build`.
+
+### Checklist rapida
+
+1. `npm run build` in locale deve passare.
+2. `npm run lint` in locale deve passare.
+3. Il commit pushato deve contenere le ultime modifiche su `src/App.tsx`.
+4. Su Cloudflare, rilancia il deploy dal commit più recente.
+
+## CI
+
+È presente una GitHub Action (`.github/workflows/build-check.yml`) che esegue automaticamente:
+
+- `npm ci`
+- `npm run lint`
+- `npm run build`
+
+così eventuali regressioni di build vengono bloccate prima della distribuzione.
