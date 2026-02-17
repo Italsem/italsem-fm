@@ -66,4 +66,10 @@ export const onRequestPost: PagesFunction<{ DB: D1Database }> = async ({ request
   } catch (e: unknown) {
     return Response.json({ ok: false, error: e instanceof Error ? e.message : "Errore creazione mezzo" }, { status: 500 });
   }
+
+  await env.DB.prepare("INSERT INTO vehicles(code, plate, model, description, active) VALUES (?, ?, ?, ?, 1)")
+    .bind(code, plate, model, description || null)
+    .run();
+
+  return Response.json({ ok: true });
 };

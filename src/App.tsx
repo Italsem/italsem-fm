@@ -314,6 +314,7 @@ export default function App() {
           <button onClick={() => { localStorage.removeItem("token"); setToken(""); setUser(null); }} className="rounded bg-slate-700 px-3 py-1">Logout</button>
         </div>
       </header>
+      {error && <div className="rounded border border-red-700 bg-red-950 p-2 text-red-300">{error}</div>}
 
       {error && <div className="rounded border border-red-700 bg-red-950 p-2 text-red-300">{error}</div>}
 
@@ -422,6 +423,8 @@ export default function App() {
               <button className="rounded bg-orange-500 px-3 py-2 font-semibold text-black md:col-span-2">Registra rifornimento</button>
             </form>
           )}
+        </section>
+      )}
 
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 text-sm">
             Totale litri: <b>{reportStats.totalLiters.toFixed(2)}</b> - Spesa: <b>EUR {reportStats.totalAmount.toFixed(2)}</b> - Consumo medio: <b>{reportStats.avgCons.toFixed(2)} l/100km</b>
