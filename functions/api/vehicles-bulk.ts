@@ -1,3 +1,15 @@
+type BulkBody = { plates?: unknown[] };
+
+type D1RunResult = { changes?: number };
+
+function parseBody(raw: string): BulkBody | null {
+  try {
+    return JSON.parse(raw) as BulkBody;
+  } catch {
+    return null;
+  }
+}
+
 export const onRequestPost: PagesFunction<{ DB: D1Database }> = async ({ request, env }) => {
   try {
     if (!env.DB) {
@@ -7,13 +19,11 @@ export const onRequestPost: PagesFunction<{ DB: D1Database }> = async ({ request
       );
     }
 
-    const raw = await request.text();
-    let body: any = null;
-    try { body = JSON.parse(raw); } catch {}
+    const body = parseBody(await request.text());
 
     const plates = (body?.plates || [])
-      .map((p: any) => String(p).trim().toUpperCase())
-      .filter((p: string) => p.length > 0);
+      .map((plate) => String(plate).trim().toUpperCase())
+      .filter((plate) => plate.length > 0);
 
     if (plates.length === 0) {
       return Response.json({ ok: false, error: "plates[] required" }, { status: 400 });
@@ -23,18 +33,20 @@ export const onRequestPost: PagesFunction<{ DB: D1Database }> = async ({ request
     let skipped = 0;
 
     for (const plate of plates) {
-      const res = await env.DB.prepare(
-        "INSERT OR IGNORE INTO vehicles (plate, name, type, notes) VALUES (?, NULL, NULL, NULL)"
-      ).bind(plate).run();
+      const res = (await env.DB.prepare(
+        "INSERT OR IGNORE INTO vehicles (code, plate, model, description, active) VALUES (?, ?, 'Senza modello', NULL, 1)"
+      )
+        .bind(plate, plate)
+        .run()) as D1RunResult;
 
-      if ((res as any).changes === 1) inserted++;
+      if (res.changes === 1) inserted++;
       else skipped++;
     }
 
     return Response.json({ ok: true, inserted, skipped });
-  } catch (e: any) {
+  } catch (error: unknown) {
     return Response.json(
-      { ok: false, error: e?.message || "Unknown error", where: "vehicles-bulk" },
+      { ok: false, error: error instanceof Error ? error.message : "Unknown error", where: "vehicles-bulk" },
       { status: 500 }
     );
   }
