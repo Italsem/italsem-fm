@@ -1,36 +1,51 @@
-export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ env }) => {
-  try {
-    if (!env.DB) {
-      return Response.json({ ok: false, error: "DB binding missing" }, { status: 500 });
-    }
+import { ensureSeedData, requireAuth, requireRole } from "./_lib/auth";
+import { ensureCoreTables } from "./_lib/setup";
 
-    const { results } = await env.DB.prepare(
-      "SELECT id, plate, name FROM vehicles ORDER BY plate"
-    ).all();
+export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request, env }) => {
+  await ensureSeedData(env.DB);
+  await ensureCoreTables(env.DB);
+  const auth = await requireAuth(request, env.DB);
+  if (auth instanceof Response) return auth;
 
-    return Response.json({ ok: true, data: results });
-  } catch (e: any) {
-    return Response.json({ ok: false, error: e?.message || "Unknown error" }, { status: 500 });
-  }
+  const url = new URL(request.url);
+  const search = `%${(url.searchParams.get("search") || "").trim().toUpperCase()}%`;
+  const activeOnly = url.searchParams.get("active") !== "all";
+
+  const { results } = await env.DB
+    .prepare(`
+      SELECT id, code, plate, model, description, active
+      FROM vehicles
+      WHERE (UPPER(code) LIKE ? OR UPPER(plate) LIKE ? OR UPPER(model) LIKE ?)
+      AND (? = 0 OR active = 1)
+      ORDER BY code
+    `)
+    .bind(search, search, search, activeOnly ? 1 : 0)
+    .all();
+
+  return Response.json({ ok: true, data: results });
 };
 
-// opzionale: se un giorno vuoi creare mezzi da UI con POST
 export const onRequestPost: PagesFunction<{ DB: D1Database }> = async ({ request, env }) => {
-  try {
-    const body = (await request.json().catch(() => null)) as { plate?: string; name?: string | null } | null;
-    const plate = String(body?.plate || "").trim().toUpperCase();
-    const name = body?.name ? String(body.name).trim() : null;
+  await ensureSeedData(env.DB);
+  await ensureCoreTables(env.DB);
+  const auth = await requireAuth(request, env.DB);
+  if (auth instanceof Response) return auth;
+  const denied = requireRole(auth, ["admin"]);
+  if (denied) return denied;
 
-    if (!plate) {
-      return Response.json({ ok: false, error: "plate required" }, { status: 400 });
-    }
+  const body = await request.json().catch(() => null) as { code?: string; plate?: string; model?: string; description?: string } | null;
+  const code = String(body?.code || "").trim().toUpperCase();
+  const plate = String(body?.plate || "").trim().toUpperCase();
+  const model = String(body?.model || "").trim();
+  const description = String(body?.description || "").trim();
 
-    await env.DB.prepare(
-      "INSERT OR IGNORE INTO vehicles (plate, name, type, notes) VALUES (?, ?, NULL, NULL)"
-    ).bind(plate, name).run();
-
-    return Response.json({ ok: true });
-  } catch (e: any) {
-    return Response.json({ ok: false, error: e?.message || "Unknown error" }, { status: 500 });
+  if (!code || !plate || !model) {
+    return Response.json({ ok: false, error: "Campi obbligatori: code, plate, model" }, { status: 400 });
   }
+
+  await env.DB.prepare("INSERT INTO vehicles(code, plate, model, description, active) VALUES (?, ?, ?, ?, 1)")
+    .bind(code, plate, model, description || null)
+    .run();
+
+  return Response.json({ ok: true });
 };
