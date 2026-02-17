@@ -33,6 +33,22 @@ type Dashboard = {
 
 type ApiErr = { ok?: boolean; error?: string };
 
+
+type ParsedApiResponse = { ok?: boolean; error?: string; token?: string };
+
+function parseApiJsonOrThrow(raw: string, url: string): ParsedApiResponse {
+  try {
+    return JSON.parse(raw) as ParsedApiResponse;
+  } catch {
+    const snippet = raw.slice(0, 120).replace(/\s+/g, " ");
+    const looksHtml = snippet.toLowerCase().includes("<!doctype") || snippet.toLowerCase().includes("<html");
+    if (looksHtml) {
+      throw new Error(`L'endpoint ${url} non sta rispondendo JSON (probabile pagina HTML). Verifica Cloudflare Pages Functions e route /api/*.`);
+    }
+    throw new Error(`Risposta non JSON da ${url}: ${snippet}`);
+  }
+}
+
 const TABS = ["dashboard", "mezzi", "rifornimenti", "utenti"] as const;
 type Tab = (typeof TABS)[number];
 
@@ -43,12 +59,7 @@ async function api<T>(url: string, token: string, init?: RequestInit): Promise<T
   });
 
   const raw = await res.text();
-  let data: ApiErr | null = null;
-  try {
-    data = JSON.parse(raw) as ApiErr;
-  } catch {
-    throw new Error(`Risposta non JSON da ${url}: ${raw.slice(0, 160)}`);
-  }
+  const data = parseApiJsonOrThrow(raw, url) as ApiErr;
 
   if (!res.ok || !data?.ok) throw new Error(data?.error || `Errore API (${res.status})`);
   return data as T;
@@ -137,7 +148,13 @@ export default function App() {
       }
       setError("");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Errore");
+      const message = e instanceof Error ? e.message : "Errore";
+      if (message.includes("/api/") && message.toLowerCase().includes("html")) {
+        localStorage.removeItem("token");
+        setToken("");
+        setUser(null);
+      }
+      setError(message);
     }
   }, [token, search, loadRefuelings]);
 
@@ -176,12 +193,7 @@ export default function App() {
         body: JSON.stringify(loginForm),
       });
       const raw = await res.text();
-      let data: { ok?: boolean; error?: string; token?: string } | null = null;
-      try {
-        data = JSON.parse(raw) as { ok?: boolean; error?: string; token?: string };
-      } catch {
-        throw new Error(`Risposta login non JSON: ${raw.slice(0, 160)}`);
-      }
+      const data = parseApiJsonOrThrow(raw, "/api/auth/login");
       if (!res.ok || !data.ok || !data.token) throw new Error(data?.error || "Login fallito");
       localStorage.setItem("token", data.token);
       setToken(data.token);
@@ -423,8 +435,6 @@ export default function App() {
               <button className="rounded bg-orange-500 px-3 py-2 font-semibold text-black md:col-span-2">Registra rifornimento</button>
             </form>
           )}
-        </section>
-      )}
 
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 text-sm">
             Totale litri: <b>{reportStats.totalLiters.toFixed(2)}</b> - Spesa: <b>EUR {reportStats.totalAmount.toFixed(2)}</b> - Consumo medio: <b>{reportStats.avgCons.toFixed(2)} l/100km</b>

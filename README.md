@@ -23,21 +23,34 @@ Questa repo usa `wrangler.toml` con:
 - `pages_build_output_dir = "dist"`
 - build command: `npm run build`
 
-Se in Cloudflare compaiono errori TypeScript/JSX (es. `Expected corresponding JSX closing tag for 'main'`), verifica sempre che il deploy stia puntando all'**ultimo commit** che passa localmente `npm run build`.
+## Errore: `Unexpected token '<' ... non e un JSON valido`
 
-### Checklist rapida
+Questo errore indica che una chiamata API (`/api/...`) ha ricevuto HTML (tipicamente `index.html`) invece di JSON.
+
+Controlli da fare su Cloudflare Pages:
+
+1. Project con **Pages Functions abilitate** (cartella `functions/` presente nel repo).
+2. Deploy del **commit piu recente** (non un merge commit vecchio).
+3. Verificare che le route `/api/*` rispondano (es. `/api/debug-db`).
+4. Verificare i binding (`DB`, `PHOTOS`) nel progetto Pages.
+
+## "Linux" nel log di deploy
+
+E normale: Cloudflare builda in ambiente Linux remoto. Non dipende dal fatto che tu usi Windows.
+
+## Checklist rapida
 
 1. `npm run build` in locale deve passare.
 2. `npm run lint` in locale deve passare.
-3. Il commit pushato deve contenere le ultime modifiche su `src/App.tsx`.
-4. Su Cloudflare, rilancia il deploy dal commit più recente.
+3. Su Cloudflare, rilancia il deploy dal commit piu recente.
+4. Testa `/api/debug-db` dopo il deploy per confermare le Functions.
 
 ## CI
 
-È presente una GitHub Action (`.github/workflows/build-check.yml`) che esegue automaticamente:
+E presente una GitHub Action (`.github/workflows/build-check.yml`) che esegue automaticamente:
 
 - `npm ci`
 - `npm run lint`
 - `npm run build`
 
-così eventuali regressioni di build vengono bloccate prima della distribuzione.
+cosi eventuali regressioni di build vengono bloccate prima della distribuzione.
