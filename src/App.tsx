@@ -260,7 +260,7 @@ export default function App() {
       <td>${r.vehicleCode} (${r.plate})</td>
       <td>${r.odometerKm.toFixed(0)}</td>
       <td>${r.liters.toFixed(2)}</td>
-      <td>€ ${r.amount.toFixed(2)}</td>
+      <td>EUR ${r.amount.toFixed(2)}</td>
       <td>${(r.consumptionL100km || 0).toFixed(2)}</td>
     </tr>`
       )
@@ -277,7 +277,7 @@ export default function App() {
       <body>
         <h1>Report rifornimenti</h1>
         <p>Mezzo: ${vehicleName} | Periodo: ${fromDate} - ${toDate}</p>
-        <p>Totale litri: <b>${reportStats.totalLiters.toFixed(2)}</b> | Totale spesa: <b>€ ${reportStats.totalAmount.toFixed(2)}</b> | Consumo medio: <b>${reportStats.avgCons.toFixed(2)} l/100km</b></p>
+        <p>Totale litri: <b>${reportStats.totalLiters.toFixed(2)}</b> | Totale spesa: <b>EUR ${reportStats.totalAmount.toFixed(2)}</b> | Consumo medio: <b>${reportStats.avgCons.toFixed(2)} l/100km</b></p>
         <table><thead><tr><th>Data</th><th>Mezzo</th><th>Km</th><th>Litri</th><th>Importo</th><th>Consumo l/100km</th></tr></thead><tbody>${htmlRows}</tbody></table>
       </body></html>
     `);
@@ -304,7 +304,7 @@ export default function App() {
   return (
     <main className="min-h-screen p-6 space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold">Italsem FM • {user.role}</h1>
+        <h1 className="text-2xl font-bold">Italsem FM - {user.role}</h1>
         <div className="space-x-2">
           {TABS.filter((t) => !(t === "utenti" && user.role !== "admin")).map((t) => (
             <button key={t} onClick={() => setTab(t)} className={`rounded px-3 py-1 ${tab === t ? "bg-orange-500 text-black" : "bg-slate-800"}`}>
@@ -321,11 +321,11 @@ export default function App() {
       {tab === "dashboard" && dashboard && (
         <section className="grid gap-4 md:grid-cols-2">
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Litri totali: <b>{dashboard.totalLiters.toFixed(2)}</b></div>
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Spesa totale: <b>€ {dashboard.totalAmount.toFixed(2)}</b></div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Spesa totale: <b>EUR {dashboard.totalAmount.toFixed(2)}</b></div>
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Consumo medio: <b>{dashboard.avgConsumption.toFixed(2)} l/100km</b></div>
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-            <h3 className="font-semibold mb-2">Mezzi con consumi più alti</h3>
-            {dashboard.highConsumption.map((m) => <div key={m.code} className="text-sm">{m.code} {m.plate} • {m.avgConsumption.toFixed(2)} l/100km</div>)}
+            <h3 className="font-semibold mb-2">Mezzi con consumi piu alti</h3>
+            {dashboard.highConsumption.map((m) => <div key={m.code} className="text-sm">{m.code} {m.plate} - {m.avgConsumption.toFixed(2)} l/100km</div>)}
           </div>
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
             <h3 className="font-semibold mb-2">Litri mensili</h3>
@@ -377,7 +377,7 @@ export default function App() {
           </div>
 
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-            {filteredVehicles.map((v) => <div key={v.id} className="border-b border-slate-800 py-2 text-sm">{v.code} • {v.model} ({v.plate}) {v.active ? "" : "[DISATTIVO]"}</div>)}
+            {filteredVehicles.map((v) => <div key={v.id} className="border-b border-slate-800 py-2 text-sm">{v.code} - {v.model} ({v.plate}) {v.active ? "" : "[DISATTIVO]"}</div>)}
           </div>
 
           {user.role === "admin" && (
@@ -427,7 +427,7 @@ export default function App() {
       )}
 
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 text-sm">
-            Totale litri: <b>{reportStats.totalLiters.toFixed(2)}</b> • Spesa: <b>€ {reportStats.totalAmount.toFixed(2)}</b> • Consumo medio: <b>{reportStats.avgCons.toFixed(2)} l/100km</b>
+            Totale litri: <b>{reportStats.totalLiters.toFixed(2)}</b> - Spesa: <b>EUR {reportStats.totalAmount.toFixed(2)}</b> - Consumo medio: <b>{reportStats.avgCons.toFixed(2)} l/100km</b>
             <select value={sortBy} onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "cons_desc")} className="ml-3 rounded bg-slate-950 p-1">
               <option value="date_desc">Ordinamento: data desc</option>
               <option value="date_asc">Ordinamento: data asc</option>
@@ -441,7 +441,7 @@ export default function App() {
               <tbody>
                 {sortedRefuelings.map((r) => (
                   <tr key={r.id} className="border-t border-slate-800">
-                    <td>{new Date(r.refuelAt).toLocaleString()}</td><td>{r.vehicleCode} ({r.plate})</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>€ {r.amount.toFixed(2)}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td>
+                    <td>{new Date(r.refuelAt).toLocaleString()}</td><td>{r.vehicleCode} ({r.plate})</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>EUR {r.amount.toFixed(2)}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td>
                     <td>{r.receiptKey ? <a className="text-orange-400" target="_blank" rel="noreferrer" href={`/api/receipt?key=${encodeURIComponent(r.receiptKey)}`}>Apri</a> : "-"}</td>
                   </tr>
                 ))}
