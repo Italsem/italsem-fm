@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS fuel_sources (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS fuel_events (
+CREATE TABLE IF NOT EXISTS vehicles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   vehicle_id INTEGER NOT NULL,
   refuel_at TEXT NOT NULL,

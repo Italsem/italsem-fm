@@ -291,6 +291,7 @@ export default function App() {
         <h1 className="text-2xl font-bold">Italsem FM - {user.role}</h1>
         <div className="space-x-2">{TABS.filter((t) => !(t === "Utenti" && user.role !== "admin")).map((t) => <button key={t} onClick={() => setTab(t)} className={`rounded-lg px-3 py-2 text-sm font-semibold ${tab === t ? "bg-orange-500 text-black" : "bg-slate-800"}`}>{t}</button>)}<button onClick={() => { localStorage.removeItem("token"); setToken(""); setUser(null); }} className="rounded-lg bg-slate-700 px-3 py-2">Logout</button></div>
       </header>
+      {error && <div className="rounded border border-red-700 bg-red-950 p-2 text-red-300">{error}</div>}
 
       {error && <div className="mb-4 rounded-lg border border-red-600 bg-red-900/40 p-2 text-red-200">{error}</div>}
 
