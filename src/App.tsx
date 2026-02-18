@@ -77,7 +77,7 @@ type DeadlineSummary = { valid: number; warning: number; expired: number; total:
 
 type ApiErr = { ok?: boolean; error?: string; token?: string };
 
-const TABS = ["Dashboard", "Mezzi", "Rifornimenti", "Utenti"] as const;
+const TABS = ["Dashboard", "Mezzi", "Rifornimenti", "Carte", "Utenti"] as const;
 type Tab = (typeof TABS)[number];
 
 function parseApiJsonOrThrow(raw: string, url: string): ApiErr {
@@ -261,9 +261,12 @@ export default function App() {
     const rows = [...refuelings];
     if (sortBy === "date_asc") rows.sort((a, b) => a.refuelAt.localeCompare(b.refuelAt));
     if (sortBy === "date_desc") rows.sort((a, b) => b.refuelAt.localeCompare(a.refuelAt));
-    if (sortBy === "cons_desc") rows.sort((a, b) => (b.consumptionL100km || 0) - (a.consumptionL100km || 0));
+    if (sortBy === "cons_desc") rows.sort((a, b) => (b.consumptionKmL || 0) - (a.consumptionKmL || 0));
     return rows;
   }, [refuelings, sortBy]);
+
+  const cards = useMemo(() => fuelSources.filter((x) => x.sourceType === "card"), [fuelSources]);
+  const tanks = useMemo(() => fuelSources.filter((x) => x.sourceType === "tank"), [fuelSources]);
 
   async function openVehicleModal(id: number) {
     const d = await api<{ data: VehicleDetail }>(`/api/vehicles/${id}`, token);
@@ -298,6 +301,14 @@ export default function App() {
     await api("/api/fuel-sources", token, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sourceForm) });
     setSourceForm({ sourceType: "card", identifier: "", assignedTo: "" });
     await loadAll();
+  }
+
+  async function deleteSource(id: number) {
+    if (user?.role !== "admin") return;
+    if (!window.confirm("Confermi la rimozione di questa carta/cisterna?")) return;
+    await api(`/api/fuel-sources/${id}`, token, { method: "DELETE" });
+    await loadAll();
+    setError("Fonte rimossa correttamente");
   }
   async function importDeadlinesFromExcel(file: File) {
     setExcelImporting(true);
@@ -502,9 +513,18 @@ export default function App() {
     if (!vehicleDetail) return;
     const deadlineRows = Object.entries(deadlineForm).filter(([,v]) => v).map(([k,v]) => `<tr><td>${DEADLINE_LABELS[k as DeadlineType]}</td><td>${new Date(v).toLocaleDateString()}</td></tr>`).join("");
     const info = `<p><b>Codice:</b> ${vehicleDetail.vehicle.code}</p><p><b>Targa:</b> ${vehicleDetail.vehicle.plate}</p><p><b>Modello:</b> ${vehicleDetail.vehicle.model}</p><p><b>Descrizione:</b> ${vehicleDetail.vehicle.description || "-"}</p>${vehicleDetail.vehicle.photo_key ? `<img src='/api/photo?key=${encodeURIComponent(vehicleDetail.vehicle.photo_key)}' style='max-width:360px;max-height:240px;object-fit:cover;border:1px solid #ddd;'/>` : ""}`;
-    const docsRows = vehicleDetail.documents.map((doc) => `<tr><td>${DOCUMENT_TYPE_LABELS[doc.docType]}</td><td><a href='/api/photo?key=${encodeURIComponent(doc.fileKey)}' target='_blank'>${doc.fileName}</a></td></tr>`).join("");
-    const docImages = vehicleDetail.documents.filter((d) => (d.mimeType || "").startsWith("image/")).map((d) => `<div style='margin:8px 0'><div><b>${DOCUMENT_TYPE_LABELS[d.docType]}</b> - ${d.fileName}</div><img src='/api/photo?key=${encodeURIComponent(d.fileKey)}' style='max-width:460px;max-height:300px;object-fit:contain;border:1px solid #ddd'/></div>`).join("");
-    void downloadPdfDocument(`Scheda Veicolo ${vehicleDetail.vehicle.code}`, `${info}<h3>Scadenze</h3><table border='1' cellpadding='6' cellspacing='0'><tr><th>Tipo</th><th>Scadenza</th></tr>${deadlineRows}</table><h3>Documenti</h3><table border='1' cellpadding='6' cellspacing='0'><tr><th>Tipo</th><th>File</th></tr>${docsRows || "<tr><td colspan='2'>Nessun documento</td></tr>"}</table>${docImages}`);
+    const docsRows = vehicleDetail.documents.map((doc) => `<tr><td>${DOCUMENT_TYPE_LABELS[doc.docType]}</td><td>${doc.fileName}</td></tr>`).join("");
+    const docsEmbedded = vehicleDetail.documents.map((d) => {
+      const url = `/api/photo?key=${encodeURIComponent(d.fileKey)}`;
+      if ((d.mimeType || "").startsWith("image/")) {
+        return `<div style='page-break-inside:avoid;margin:12px 0'><h4 style='margin:0 0 6px 0'>${DOCUMENT_TYPE_LABELS[d.docType]} - ${d.fileName}</h4><img src='${url}' style='max-width:520px;max-height:680px;object-fit:contain;border:1px solid #ddd'/></div>`;
+      }
+      if ((d.mimeType || "").includes("pdf") || d.fileName.toLowerCase().endsWith(".pdf")) {
+        return `<div style='page-break-before:always'><h4 style='margin:0 0 6px 0'>${DOCUMENT_TYPE_LABELS[d.docType]} - ${d.fileName}</h4><iframe src='${url}#toolbar=0&navpanes=0&scrollbar=0' style='width:100%;height:900px;border:1px solid #ddd'></iframe></div>`;
+      }
+      return `<div style='margin:8px 0'><b>${DOCUMENT_TYPE_LABELS[d.docType]}</b> - <a href='${url}' target='_blank'>${d.fileName}</a></div>`;
+    }).join("");
+    void downloadPdfDocument(`Scheda Veicolo ${vehicleDetail.vehicle.code}`, `${info}<h3>Scadenze</h3><table border='1' cellpadding='6' cellspacing='0'><tr><th>Tipo</th><th>Scadenza</th></tr>${deadlineRows}</table><h3>Documenti</h3><table border='1' cellpadding='6' cellspacing='0'><tr><th>Tipo</th><th>File</th></tr>${docsRows || "<tr><td colspan='2'>Nessun documento</td></tr>"}</table>${docsEmbedded}`);
   }
 
   function exportRefuelingsPdf() {
@@ -540,7 +560,7 @@ export default function App() {
         <section className="grid gap-4 md:grid-cols-3">
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Litri Totali: <b>{dashboard.totalLiters.toFixed(2)}</b></div>
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Spesa Totale: <b>EUR {dashboard.totalAmount.toFixed(2)}</b></div>
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Consumo Medio: <b>{dashboard.avgConsumption.toFixed(2)} L/100Km</b></div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Consumo Medio: <b>{dashboard.avgConsumption.toFixed(2)} Km/L</b></div>
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 md:col-span-3">
             <h3 className="mb-2 font-semibold">Riepilogo Scadenze</h3>
             <div className="flex flex-wrap gap-4 text-sm">
@@ -579,7 +599,7 @@ export default function App() {
 
           <div className="grid gap-4 md:grid-cols-3">
             {user.role === "admin" && <form onSubmit={addVehicle} className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Nuovo Mezzo</h3><input required className="w-full rounded bg-slate-950 p-2" placeholder="Codice" value={vehicleForm.code} onChange={(e) => setVehicleForm({ ...vehicleForm, code: e.target.value })} /><input required className="w-full rounded bg-slate-950 p-2" placeholder="Targa" value={vehicleForm.plate} onChange={(e) => setVehicleForm({ ...vehicleForm, plate: e.target.value })} /><input required className="w-full rounded bg-slate-950 p-2" placeholder="Modello" value={vehicleForm.model} onChange={(e) => setVehicleForm({ ...vehicleForm, model: e.target.value })} /><input className="w-full rounded bg-slate-950 p-2" placeholder="Descrizione" value={vehicleForm.description} onChange={(e) => setVehicleForm({ ...vehicleForm, description: e.target.value })} /><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Aggiungi Mezzo</button></form>}
-            {user.role === "admin" && <form onSubmit={addSource} className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Nuova Carta/Cisterna</h3><select className="w-full rounded bg-slate-950 p-2" value={sourceForm.sourceType} onChange={(e) => setSourceForm({ ...sourceForm, sourceType: e.target.value as "card" | "tank" })}><option value="card">Carta Carburante</option><option value="tank">Cisterna</option></select><input className="w-full rounded bg-slate-950 p-2" placeholder="Identificativo" value={sourceForm.identifier} onChange={(e) => setSourceForm({ ...sourceForm, identifier: e.target.value })} /><input className="w-full rounded bg-slate-950 p-2" placeholder="Utilizzatore carta/mezzo" value={sourceForm.assignedTo} onChange={(e) => setSourceForm({ ...sourceForm, assignedTo: e.target.value })} /><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Salva</button></form>}
+            
             {user.role === "admin" && <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Importa Scadenze Da Excel</h3><p className="text-xs text-slate-400">Colonne supportate: Targa, Revisione, Assicurazione/RCA, Bollo, Tachigrafo, Periodica Gru, Strutturale</p><input type="file" accept=".xlsx,.xls,.csv" className="w-full rounded bg-slate-950 p-2" onChange={(e) => setExcelImportFile(e.target.files?.[0] || null)} /><button type="button" disabled={!excelImportFile || excelImporting} className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50" onClick={async () => { if (!excelImportFile) return; try { await importDeadlinesFromExcel(excelImportFile); setExcelImportFile(null); } catch (err: unknown) { setError(err instanceof Error ? err.message : "Errore import Excel"); } }}>IMPORTA EXCEL</button></div>}
           </div>
         </section>
@@ -589,7 +609,17 @@ export default function App() {
         <section className="space-y-4">
           <div className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-6"><select value={filterVehicleId} onChange={(e) => setFilterVehicleId(Number(e.target.value))} className="rounded bg-slate-950 p-2"><option value={0}>Tutti I Mezzi</option>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><select value={filterSourceIdentifier} onChange={(e) => setFilterSourceIdentifier(e.target.value)} className="rounded bg-slate-950 p-2"><option value="">Tutte Le Fonti</option>{fuelSources.filter((x) => x.active).map((x) => <option key={x.id} value={x.identifier}>{x.identifier} {x.assignedTo ? `- ${x.assignedTo}` : ""}</option>)}</select><input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="rounded bg-slate-950 p-2" /><input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="rounded bg-slate-950 p-2" /><button onClick={() => loadRefuelings(token, filterVehicleId)} className="rounded-lg bg-slate-700 px-3 py-2">Filtra</button><button type="button" onClick={exportRefuelingsPdf} className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Export PDF</button></div>
           {(user.role === "admin" || user.role === "technician") && <form onSubmit={addRefueling} className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-2"><select name="vehicleId" required className="rounded bg-slate-950 p-2"><option value="">Seleziona Mezzo</option>{vehicles.filter((v) => v.active).map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><input name="refuelAt" type="date" required className="rounded bg-slate-950 p-2" /><input name="odometerKm" type="number" min="0" required className="rounded bg-slate-950 p-2" placeholder="Chilometraggio" /><input name="liters" type="number" min="0.01" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Litri" /><input name="amount" type="number" min="0" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Importo in €" /><select name="sourceType" value={refuelSourceType} onChange={(e) => setRefuelSourceType(e.target.value as "card" | "tank")} className="rounded bg-slate-950 p-2"><option value="card">Carta Carburante</option><option value="tank">Cisterna</option></select><select name="sourceIdentifier" required className="rounded bg-slate-950 p-2"><option value="">Seleziona Carta/Cisterna</option>{fuelSources.filter((x) => x.active && x.sourceType === refuelSourceType).map((x) => <option key={x.id} value={x.identifier}>{x.identifier}{x.assignedTo ? ` - ${x.assignedTo}` : ""}</option>)}</select><input name="receipt" type="file" accept="image/*,.pdf" className="rounded bg-slate-950 p-2" /><span className="self-center text-xs text-slate-400">Scontrino facoltativo</span><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black md:col-span-2">Registra Rifornimento</button></form>}
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "cons_desc")} className="rounded bg-slate-950 p-2"><option value="date_desc">Data Desc</option><option value="date_asc">Data Asc</option><option value="cons_desc">Consumo Alto</option></select><div className="mt-2 overflow-auto"><table className="min-w-full text-sm"><thead><tr><th className="text-left">Data</th><th className="text-left">Mezzo</th><th className="text-left">Fonte</th><th className="text-left">Utilizzatore</th><th className="text-left">Km</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th>{(user.role === "admin" || user.role === "technician") && <th className="text-left">Azioni</th>}</tr></thead><tbody>{sortedRefuelings.map((r) => <tr key={r.id} className="border-t border-slate-800"><td>{new Date(r.refuelAt).toLocaleDateString()}</td><td>{r.vehicleCode}</td><td>{r.sourceType === "tank" ? "Cisterna" : "Carta"} / {r.sourceIdentifier}</td><td>{r.sourceAssignedTo || "-"}</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>EUR {r.amount.toFixed(2)}</td><td>{r.consumptionKmL ? r.consumptionKmL.toFixed(2) : "-"}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td>{(user.role === "admin" || user.role === "technician") && <td><div className="flex gap-1"><button type="button" onClick={() => { void editRefueling(r); }} className="rounded bg-slate-700 px-2 py-1 text-xs">Modifica</button><button type="button" onClick={() => { void deleteRefueling(r.id); }} className="rounded bg-red-700 px-2 py-1 text-xs">Elimina</button></div></td>}</tr>)}</tbody></table></div></div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "cons_desc")} className="rounded bg-slate-950 p-2"><option value="date_desc">Data Desc</option><option value="date_asc">Data Asc</option><option value="cons_desc">Km/L Alto</option></select><div className="mt-2 overflow-auto"><table className="min-w-full text-sm"><thead><tr><th className="text-left">Data</th><th className="text-left">Mezzo</th><th className="text-left">Fonte</th><th className="text-left">Utilizzatore</th><th className="text-left">Km</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th>{(user.role === "admin" || user.role === "technician") && <th className="text-left">Azioni</th>}</tr></thead><tbody>{sortedRefuelings.map((r) => <tr key={r.id} className="border-t border-slate-800"><td>{new Date(r.refuelAt).toLocaleDateString()}</td><td>{r.vehicleCode}</td><td>{r.sourceType === "tank" ? "Cisterna" : "Carta"} / {r.sourceIdentifier}</td><td>{r.sourceAssignedTo || "-"}</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>EUR {r.amount.toFixed(2)}</td><td>{r.consumptionKmL ? r.consumptionKmL.toFixed(2) : "-"}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td>{(user.role === "admin" || user.role === "technician") && <td><div className="flex gap-1"><button type="button" onClick={() => { void editRefueling(r); }} className="rounded bg-slate-700 px-2 py-1 text-xs">Modifica</button><button type="button" onClick={() => { void deleteRefueling(r.id); }} className="rounded bg-red-700 px-2 py-1 text-xs">Elimina</button></div></td>}</tr>)}</tbody></table></div></div>
+        </section>
+      )}
+
+      {tab === "Carte" && (
+        <section className="space-y-4">
+          {user.role === "admin" && <form onSubmit={addSource} className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-4"><select className="rounded bg-slate-950 p-2" value={sourceForm.sourceType} onChange={(e) => setSourceForm({ ...sourceForm, sourceType: e.target.value as "card" | "tank" })}><option value="card">Carta Carburante</option><option value="tank">Cisterna</option></select><input className="rounded bg-slate-950 p-2" placeholder="Identificativo" value={sourceForm.identifier} onChange={(e) => setSourceForm({ ...sourceForm, identifier: e.target.value })} /><input className="rounded bg-slate-950 p-2" placeholder="Utilizzatore" value={sourceForm.assignedTo} onChange={(e) => setSourceForm({ ...sourceForm, assignedTo: e.target.value })} /><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Aggiungi</button></form>}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="mb-2 font-semibold">Carte Carburante</h3><div className="space-y-2 text-sm">{cards.length === 0 && <div className="text-slate-400">Nessuna carta</div>}{cards.map((c) => <div key={c.id} className="flex items-center justify-between rounded border border-slate-800 p-2"><div><div className="font-medium">{c.identifier}</div><div className="text-xs text-slate-400">Utilizzatore: {c.assignedTo || "-"}</div></div>{user.role === "admin" && <button type="button" className="rounded bg-red-700 px-2 py-1 text-xs" onClick={() => { void deleteSource(c.id); }}>Rimuovi</button>}</div>)}</div></div>
+            <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="mb-2 font-semibold">Cisterne</h3><div className="space-y-2 text-sm">{tanks.length === 0 && <div className="text-slate-400">Nessuna cisterna</div>}{tanks.map((c) => <div key={c.id} className="flex items-center justify-between rounded border border-slate-800 p-2"><div><div className="font-medium">{c.identifier}</div><div className="text-xs text-slate-400">Utilizzatore: {c.assignedTo || "-"}</div></div>{user.role === "admin" && <button type="button" className="rounded bg-red-700 px-2 py-1 text-xs" onClick={() => { void deleteSource(c.id); }}>Rimuovi</button>}</div>)}</div></div>
+          </div>
         </section>
       )}
 
