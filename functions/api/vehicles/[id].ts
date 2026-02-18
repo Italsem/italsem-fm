@@ -30,7 +30,7 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
   const deadlines = await env.DB
     .prepare("SELECT deadline_type as deadlineType, due_date as dueDate FROM vehicle_deadlines WHERE vehicle_id = ? ORDER BY deadline_type")
     .bind(id)
-    .all<{ deadlineType: "bollo" | "revisione" | "rca"; dueDate: string }>();
+    .all<{ deadlineType: "bollo" | "revisione" | "rca" | "tachigrafo" | "periodica_gru" | "strutturale"; dueDate: string }>();
 
   const history = await env.DB
     .prepare(`
