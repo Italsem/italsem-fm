@@ -69,6 +69,18 @@ async function ensureFuelEventColumns(db: D1Database) {
   `).run();
 }
 
+
+async function ensureFuelSourceColumns(db: D1Database) {
+  const info = await db.prepare("PRAGMA table_info(fuel_sources)").all<TableInfo>();
+  const cols = new Set((info.results || []).map((c) => c.name));
+
+  if (!cols.has("assigned_to")) {
+    await db.prepare("ALTER TABLE fuel_sources ADD COLUMN assigned_to TEXT").run();
+  }
+
+  await db.prepare("UPDATE fuel_sources SET assigned_to = COALESCE(NULLIF(TRIM(assigned_to), ''), NULL)").run();
+}
+
 export async function ensureCoreTables(db: D1Database) {
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS vehicles (
@@ -90,10 +102,13 @@ export async function ensureCoreTables(db: D1Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       source_type TEXT NOT NULL,
       identifier TEXT NOT NULL UNIQUE,
+      assigned_to TEXT,
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `).run();
+
+  await ensureFuelSourceColumns(db);
 
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS fuel_events (
@@ -128,6 +143,23 @@ export async function ensureCoreTables(db: D1Database) {
   `).run();
 
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_vehicle_deadlines_due ON vehicle_deadlines(due_date)").run();
+
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS vehicle_documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vehicle_id INTEGER NOT NULL,
+      doc_type TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      file_key TEXT NOT NULL,
+      mime_type TEXT,
+      uploaded_by INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY(vehicle_id) REFERENCES vehicles(id),
+      FOREIGN KEY(uploaded_by) REFERENCES users(id)
+    )
+  `).run();
+
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_vehicle_documents_vehicle ON vehicle_documents(vehicle_id)").run();
 
   const seeded = await db.prepare("SELECT COUNT(*) as count FROM fuel_sources").first<{ count: number }>();
   if (!seeded?.count) {
