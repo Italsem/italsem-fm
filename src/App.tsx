@@ -12,7 +12,6 @@ type Vehicle = {
   photo_key?: string | null;
   active: number;
 };
-type FuelSource = { id: number; source_type: "card" | "tank"; identifier: string; active: number };
 type Refueling = {
   id: number;
   vehicleId: number;
@@ -116,7 +115,6 @@ export default function App() {
   const [error, setError] = useState("");
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [sources, setSources] = useState<FuelSource[]>([]);
   const [refuelings, setRefuelings] = useState<Refueling[]>([]);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [users, setUsers] = useState<UserAdmin[]>([]);
@@ -152,14 +150,12 @@ export default function App() {
     try {
       const me = await api<{ user: User }>("/api/auth/me", currentToken);
       setUser(me.user);
-      const [v, s, d, ds] = await Promise.all([
+      const [v, d, ds] = await Promise.all([
         api<{ data: Vehicle[] }>(`/api/vehicles?search=${encodeURIComponent(search)}&active=all`, currentToken),
-        api<{ data: FuelSource[] }>("/api/fuel-sources", currentToken),
         api<{ data: Dashboard }>("/api/dashboard", currentToken),
         api<{ data: DeadlineSummary }>("/api/deadlines/summary", currentToken),
       ]);
       setVehicles(v.data);
-      setSources(s.data.filter((x) => x.active));
       setDashboard(d.data);
       setDeadlineSummary(ds.data);
       await loadRefuelings(currentToken);
@@ -265,8 +261,8 @@ export default function App() {
     if (!vehicleDetail) return;
     const w = window.open("", "_blank");
     if (!w) return;
-    const rows = vehicleDetail.history.map((h) => `<tr><td>${new Date(h.refuelAt).toLocaleString()}</td><td>${h.odometerKm}</td><td>${h.liters.toFixed(2)}</td><td>${h.amount.toFixed(2)}</td><td>${(h.consumptionL100km || 0).toFixed(2)}</td></tr>`).join("");
-    w.document.write(`<html><body><h1>Storico Rifornimenti ${vehicleDetail.vehicle.code}</h1><table border='1' cellpadding='6' cellspacing='0'><tr><th>Data</th><th>Km</th><th>Litri</th><th>Importo</th><th>Consumo</th></tr>${rows}</table></body></html>`);
+    const rows = vehicleDetail.history.map((h) => `<tr><td>${new Date(h.refuelAt).toLocaleDateString()}</td><td>${h.odometerKm}</td><td>${h.liters.toFixed(2)}</td><td>${h.amount.toFixed(2)}</td><td>${(h.consumptionL100km || 0).toFixed(2)}</td></tr>`).join("");
+    w.document.write(`<html><body><div style='display:flex;align-items:center;gap:12px;margin-bottom:12px;'><img src='/logo.png' alt='Italsem FM' style='height:44px' /><h1 style='margin:0'>Storico Rifornimenti ${vehicleDetail.vehicle.code}</h1></div><table border='1' cellpadding='6' cellspacing='0'><tr><th>Data</th><th>Km</th><th>Litri</th><th>Importo</th><th>Consumo</th></tr>${rows}</table></body></html>`);
     w.document.close();
     w.print();
   }
@@ -288,7 +284,7 @@ export default function App() {
   return (
     <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
       <header className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-4">
-        <h1 className="text-2xl font-bold">Italsem FM - {user.role}</h1>
+        <div className="flex items-center gap-3"><img src="/logo-bianco.png" alt="Italsem FM" className="h-10 w-auto" /><h1 className="text-2xl font-bold">Italsem FM - {user.role}</h1></div>
         <div className="space-x-2">{TABS.filter((t) => !(t === "Utenti" && user.role !== "admin")).map((t) => <button key={t} onClick={() => setTab(t)} className={`rounded-lg px-3 py-2 text-sm font-semibold ${tab === t ? "bg-orange-500 text-black" : "bg-slate-800"}`}>{t}</button>)}<button onClick={() => { localStorage.removeItem("token"); setToken(""); setUser(null); }} className="rounded-lg bg-slate-700 px-3 py-2">Logout</button></div>
       </header>
       {error && <div className="rounded border border-red-700 bg-red-950 p-2 text-red-300">{error}</div>}
@@ -341,8 +337,8 @@ export default function App() {
       {tab === "Rifornimenti" && (
         <section className="space-y-4">
           <div className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-4"><select value={filterVehicleId} onChange={(e) => setFilterVehicleId(Number(e.target.value))} className="rounded bg-slate-950 p-2"><option value={0}>Tutti I Mezzi</option>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="rounded bg-slate-950 p-2" /><input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="rounded bg-slate-950 p-2" /><button onClick={() => loadRefuelings(token, filterVehicleId)} className="rounded-lg bg-slate-700 px-3 py-2">Filtra</button></div>
-          {(user.role === "admin" || user.role === "technician") && <form onSubmit={addRefueling} className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-2"><select name="vehicleId" required className="rounded bg-slate-950 p-2"><option value="">Seleziona Mezzo</option>{vehicles.filter((v) => v.active).map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><input name="refuelAt" type="datetime-local" required className="rounded bg-slate-950 p-2" /><input name="odometerKm" type="number" min="0" required className="rounded bg-slate-950 p-2" placeholder="Chilometraggio" /><input name="liters" type="number" min="0.01" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Litri" /><input name="amount" type="number" min="0" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Importo" /><select name="sourceType" className="rounded bg-slate-950 p-2"><option value="card">Carta Carburante</option><option value="tank">Cisterna</option></select><input name="sourceIdentifier" required list="sources" className="rounded bg-slate-950 p-2" placeholder="ID Carta/Cisterna" /><input name="receipt" type="file" className="rounded bg-slate-950 p-2" /><datalist id="sources">{sources.map((s) => <option key={s.id} value={s.identifier} />)}</datalist><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black md:col-span-2">Registra Rifornimento</button></form>}
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "cons_desc")} className="rounded bg-slate-950 p-2"><option value="date_desc">Data Desc</option><option value="date_asc">Data Asc</option><option value="cons_desc">Consumo Alto</option></select><div className="mt-2 overflow-auto"><table className="min-w-full text-sm"><thead><tr><th className="text-left">Data</th><th className="text-left">Mezzo</th><th className="text-left">Km</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Consumo</th></tr></thead><tbody>{sortedRefuelings.map((r) => <tr key={r.id} className="border-t border-slate-800"><td>{new Date(r.refuelAt).toLocaleString()}</td><td>{r.vehicleCode}</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>EUR {r.amount.toFixed(2)}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td></tr>)}</tbody></table></div></div>
+          {(user.role === "admin" || user.role === "technician") && <form onSubmit={addRefueling} className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-2"><select name="vehicleId" required className="rounded bg-slate-950 p-2"><option value="">Seleziona Mezzo</option>{vehicles.filter((v) => v.active).map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><input name="refuelAt" type="date" required className="rounded bg-slate-950 p-2" /><input name="odometerKm" type="number" min="0" required className="rounded bg-slate-950 p-2" placeholder="Chilometraggio" /><input name="liters" type="number" min="0.01" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Litri" /><input name="amount" type="number" min="0" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Importo" /><input name="receipt" type="file" accept="image/*,.pdf" className="rounded bg-slate-950 p-2" /><span className="self-center text-xs text-slate-400">Scontrino facoltativo</span><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black md:col-span-2">Registra Rifornimento</button></form>}
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "cons_desc")} className="rounded bg-slate-950 p-2"><option value="date_desc">Data Desc</option><option value="date_asc">Data Asc</option><option value="cons_desc">Consumo Alto</option></select><div className="mt-2 overflow-auto"><table className="min-w-full text-sm"><thead><tr><th className="text-left">Data</th><th className="text-left">Mezzo</th><th className="text-left">Km</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Consumo</th></tr></thead><tbody>{sortedRefuelings.map((r) => <tr key={r.id} className="border-t border-slate-800"><td>{new Date(r.refuelAt).toLocaleDateString()}</td><td>{r.vehicleCode}</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>EUR {r.amount.toFixed(2)}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td></tr>)}</tbody></table></div></div>
         </section>
       )}
 
