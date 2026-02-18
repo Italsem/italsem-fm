@@ -131,7 +131,6 @@ export default function App() {
   const [error, setError] = useState("");
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [sources, setSources] = useState<FuelSource[]>([]);
   const [refuelings, setRefuelings] = useState<Refueling[]>([]);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [users, setUsers] = useState<UserAdmin[]>([]);
@@ -168,9 +167,8 @@ export default function App() {
     try {
       const me = await api<{ user: User }>("/api/auth/me", currentToken);
       setUser(me.user);
-      const [v, s, d, ds] = await Promise.all([
+      const [v, d, ds] = await Promise.all([
         api<{ data: Vehicle[] }>(`/api/vehicles?search=${encodeURIComponent(search)}&active=all`, currentToken),
-        api<{ data: FuelSource[] }>("/api/fuel-sources", currentToken),
         api<{ data: Dashboard }>("/api/dashboard", currentToken),
         api<{ data: DeadlineSummary }>("/api/deadlines/summary", currentToken),
       ]);
