@@ -33,6 +33,7 @@ type Refueling = {
 };
 type UserAdmin = { id: number; username: string; role: Role; active: number; created_at: string };
 type DeadlineType = "bollo" | "revisione" | "rca" | "tachigrafo" | "periodica_gru" | "strutturale";
+type VehicleDocumentType = "libretto" | "rca" | "revisione" | "bollo" | "altro";
 
 const BASE_DEADLINE_TYPES: DeadlineType[] = ["bollo", "revisione", "rca"];
 const OPTIONAL_DEADLINE_TYPES: DeadlineType[] = ["tachigrafo", "periodica_gru", "strutturale"];
@@ -45,10 +46,19 @@ const DEADLINE_LABELS: Record<DeadlineType, string> = {
   strutturale: "Strutturale",
 };
 
+const DOCUMENT_TYPE_LABELS: Record<VehicleDocumentType, string> = {
+  libretto: "Libretto",
+  rca: "RCA",
+  revisione: "Revisione",
+  bollo: "Bollo",
+  altro: "Altro",
+};
+
 type VehicleDetail = {
   vehicle: Vehicle;
   deadlines: Array<{ deadlineType: DeadlineType; dueDate: string }>;
   history: Array<{ id: number; refuelAt: string; odometerKm: number; liters: number; amount: number; sourceType: string; consumptionL100km?: number }>;
+  documents: Array<{ id: number; docType: VehicleDocumentType; fileName: string; fileKey: string; mimeType?: string | null; createdAt: string }>;
 };
 
 type Dashboard = {
@@ -189,6 +199,7 @@ export default function App() {
   const [enabledOptionalDeadlines, setEnabledOptionalDeadlines] = useState<DeadlineType[]>([]);
   const [excelImportFile, setExcelImportFile] = useState<File | null>(null);
   const [excelImporting, setExcelImporting] = useState(false);
+  const [documentType, setDocumentType] = useState<VehicleDocumentType>("libretto");
 
   const loadRefuelings = useCallback(async (currentToken: string, vehicleId = filterVehicleId) => {
     const params = new URLSearchParams();
@@ -350,10 +361,11 @@ export default function App() {
   }
   async function addRefueling(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
     try {
       await submitRefueling(form);
-      e.currentTarget.reset();
+      formEl.reset();
       setError("Rifornimento registrato correttamente");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Errore salvataggio rifornimento");
@@ -385,6 +397,23 @@ export default function App() {
     await api(`/api/vehicles/${vehicleDetail.vehicle.id}/photo`, token, { method: "POST", body: form });
     await openVehicleModal(vehicleDetail.vehicle.id);
     await loadAll();
+  }
+
+  async function uploadVehicleDocument(file: File) {
+    if (!vehicleDetail || user?.role !== "admin") return;
+    const form = new FormData();
+    form.append("file", file);
+    form.append("docType", documentType);
+    await api(`/api/vehicles/${vehicleDetail.vehicle.id}/documents`, token, { method: "POST", body: form });
+    await openVehicleModal(vehicleDetail.vehicle.id);
+    setError("Documento caricato correttamente");
+  }
+
+  async function deleteVehicleDocument(docId: number) {
+    if (!vehicleDetail || user?.role !== "admin") return;
+    await api(`/api/vehicles/${vehicleDetail.vehicle.id}/documents?docId=${docId}`, token, { method: "DELETE" });
+    await openVehicleModal(vehicleDetail.vehicle.id);
+    setError("Documento eliminato");
   }
 
   async function downloadPdfDocument(title: string, rows: string) {
@@ -581,6 +610,30 @@ export default function App() {
                 <h3 className="font-semibold">Foto Mezzo</h3>
                 {vehicleDetail.vehicle.photo_key ? <img src={`/api/photo?key=${encodeURIComponent(vehicleDetail.vehicle.photo_key)}`} className="h-44 w-full rounded object-cover" /> : <div className="h-44 rounded bg-slate-800" />}
                 {user.role === "admin" && <input type="file" accept="image/*" className="w-full rounded bg-slate-950 p-2" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadVehiclePhoto(f); }} />}
+
+                <div className="rounded border border-slate-700 p-3">
+                  <h3 className="mb-2 font-semibold">Documenti Mezzo</h3>
+                  {user.role === "admin" && (
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <select value={documentType} onChange={(e) => setDocumentType(e.target.value as VehicleDocumentType)} className="rounded bg-slate-950 p-2 text-sm">
+                        {(Object.keys(DOCUMENT_TYPE_LABELS) as VehicleDocumentType[]).map((t) => <option key={t} value={t}>{DOCUMENT_TYPE_LABELS[t]}</option>)}
+                      </select>
+                      <input type="file" accept=".pdf,image/*,.doc,.docx,.xls,.xlsx" className="rounded bg-slate-950 p-2 text-sm" onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadVehicleDocument(f); e.currentTarget.value = ""; }} />
+                    </div>
+                  )}
+                  <div className="max-h-40 space-y-2 overflow-auto text-sm">
+                    {vehicleDetail.documents.length === 0 && <div className="text-slate-400">Nessun documento caricato</div>}
+                    {vehicleDetail.documents.map((doc) => (
+                      <div key={doc.id} className="flex items-center justify-between gap-2 rounded border border-slate-800 p-2">
+                        <div className="min-w-0">
+                          <div className="font-medium">{DOCUMENT_TYPE_LABELS[doc.docType]}</div>
+                          <a href={`/api/photo?key=${encodeURIComponent(doc.fileKey)}`} target="_blank" rel="noreferrer" className="block truncate text-orange-400 hover:underline">{doc.fileName}</a>
+                        </div>
+                        {user.role === "admin" && <button type="button" onClick={() => { void deleteVehicleDocument(doc.id); }} className="rounded bg-red-700 px-2 py-1 text-xs">Elimina</button>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
                 <div className="mt-3 rounded border border-slate-700 p-3">
                   <div className="mb-2 flex items-center justify-between"><h3 className="font-semibold">Storico Rifornimenti</h3><div className="flex gap-2"><button type="button" onClick={exportVehicleHistoryPdf} className="rounded bg-orange-500 px-2 py-1 text-sm font-semibold text-black">PDF Consumi</button><button type="button" onClick={exportVehicleSheetPdf} className="rounded bg-slate-700 px-2 py-1 text-sm font-semibold">PDF Scheda Mezzo</button></div></div>

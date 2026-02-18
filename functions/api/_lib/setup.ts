@@ -129,6 +129,23 @@ export async function ensureCoreTables(db: D1Database) {
 
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_vehicle_deadlines_due ON vehicle_deadlines(due_date)").run();
 
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS vehicle_documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vehicle_id INTEGER NOT NULL,
+      doc_type TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      file_key TEXT NOT NULL,
+      mime_type TEXT,
+      uploaded_by INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY(vehicle_id) REFERENCES vehicles(id),
+      FOREIGN KEY(uploaded_by) REFERENCES users(id)
+    )
+  `).run();
+
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_vehicle_documents_vehicle ON vehicle_documents(vehicle_id)").run();
+
   const seeded = await db.prepare("SELECT COUNT(*) as count FROM fuel_sources").first<{ count: number }>();
   if (!seeded?.count) {
     await db.prepare("INSERT INTO fuel_sources(source_type, identifier, active) VALUES ('card','CARD-001',1),('tank','TANK-CENTRALE',1)").run();

@@ -1,6 +1,15 @@
 import { ensureSeedData, requireAuth, requireRole } from "../_lib/auth";
 import { ensureCoreTables } from "../_lib/setup";
 
+type VehicleDocument = {
+  id: number;
+  docType: "libretto" | "rca" | "revisione" | "bollo" | "altro";
+  fileName: string;
+  fileKey: string;
+  mimeType: string | null;
+  createdAt: string;
+};
+
 type VehicleRow = {
   id: number;
   code: string;
@@ -49,7 +58,22 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
     .bind(id)
     .all();
 
-  return Response.json({ ok: true, data: { vehicle, deadlines: deadlines.results, history: history.results } });
+  const documents = await env.DB
+    .prepare(`
+      SELECT id,
+        doc_type as docType,
+        file_name as fileName,
+        file_key as fileKey,
+        mime_type as mimeType,
+        created_at as createdAt
+      FROM vehicle_documents
+      WHERE vehicle_id = ?
+      ORDER BY created_at DESC
+    `)
+    .bind(id)
+    .all<VehicleDocument>();
+
+  return Response.json({ ok: true, data: { vehicle, deadlines: deadlines.results, history: history.results, documents: documents.results } });
 };
 
 export const onRequestPatch: PagesFunction<{ DB: D1Database }> = async ({ request, env, params }) => {
@@ -100,12 +124,20 @@ export const onRequestDelete: PagesFunction<{ DB: D1Database; PHOTOS?: R2Bucket 
     return Response.json({ ok: false, error: "Mezzo Non Trovato" }, { status: 404 });
   }
 
+  const docs = await env.DB.prepare("SELECT file_key as fileKey FROM vehicle_documents WHERE vehicle_id = ?").bind(id).all<{ fileKey: string }>();
+
   await env.DB.prepare("DELETE FROM vehicle_deadlines WHERE vehicle_id = ?").bind(id).run();
   await env.DB.prepare("DELETE FROM fuel_events WHERE vehicle_id = ?").bind(id).run();
+  await env.DB.prepare("DELETE FROM vehicle_documents WHERE vehicle_id = ?").bind(id).run();
   await env.DB.prepare("DELETE FROM vehicles WHERE id = ?").bind(id).run();
 
-  if (vehicle.photoKey && env.PHOTOS) {
-    await env.PHOTOS.delete(vehicle.photoKey).catch(() => undefined);
+  if (env.PHOTOS) {
+    if (vehicle.photoKey) {
+      await env.PHOTOS.delete(vehicle.photoKey).catch(() => undefined);
+    }
+    for (const doc of docs.results || []) {
+      await env.PHOTOS.delete(doc.fileKey).catch(() => undefined);
+    }
   }
 
   return Response.json({ ok: true });
