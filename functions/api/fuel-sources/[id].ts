@@ -31,3 +31,25 @@ export const onRequestDelete: PagesFunction<{ DB: D1Database }> = async ({ reque
   await env.DB.prepare("DELETE FROM fuel_sources WHERE id = ?").bind(id).run();
   return Response.json({ ok: true });
 };
+
+
+export const onRequestPatch: PagesFunction<{ DB: D1Database }> = async ({ request, env, params }) => {
+  await ensureSeedData(env.DB);
+  await ensureCoreTables(env.DB);
+  const auth = await requireAuth(request, env.DB);
+  if (auth instanceof Response) return auth;
+  const denied = requireRole(auth, ["admin"]);
+  if (denied) return denied;
+
+  const id = Number(params.id);
+  if (!id) return Response.json({ ok: false, error: "ID non valido" }, { status: 400 });
+
+  const body = await request.json().catch(() => null) as { assignedTo?: string } | null;
+  const assignedTo = String(body?.assignedTo || "").trim();
+
+  const existing = await env.DB.prepare("SELECT id FROM fuel_sources WHERE id = ?").bind(id).first<{ id: number }>();
+  if (!existing) return Response.json({ ok: false, error: "Fonte non trovata" }, { status: 404 });
+
+  await env.DB.prepare("UPDATE fuel_sources SET assigned_to = ? WHERE id = ?").bind(assignedTo || null, id).run();
+  return Response.json({ ok: true });
+};

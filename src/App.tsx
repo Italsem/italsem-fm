@@ -158,6 +158,17 @@ function findExcelValue(row: Record<string, unknown>, aliases: string[]) {
   return "";
 }
 
+function parseNumberish(value: unknown) {
+  const raw = String(value ?? "").trim().replace(",", ".");
+  const n = Number(raw.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function last4Digits(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits.slice(-4);
+}
+
 function MiniBars({ data }: { data: Array<{ label: string; value: number }> }) {
   const max = Math.max(1, ...data.map((d) => d.value));
   return (
@@ -196,6 +207,7 @@ export default function App() {
   const [vehicleForm, setVehicleForm] = useState({ code: "", plate: "", model: "", description: "" });
   const [sourceForm, setSourceForm] = useState({ sourceType: "card", identifier: "", assignedTo: "" });
   const [passwordForm, setPasswordForm] = useState({ userId: 0, password: "" });
+  const [newUserForm, setNewUserForm] = useState<{ username: string; password: string; role: "admin" | "technician" }>({ username: "", password: "", role: "technician" });
 
   const [modalOpen, setModalOpen] = useState(false);
   const [vehicleDetail, setVehicleDetail] = useState<VehicleDetail | null>(null);
@@ -206,6 +218,8 @@ export default function App() {
   const [excelImporting, setExcelImporting] = useState(false);
   const [documentType, setDocumentType] = useState<VehicleDocumentType>("libretto");
   const [refuelSourceType, setRefuelSourceType] = useState<"card" | "tank">("card");
+  const [refuelImportFile, setRefuelImportFile] = useState<File | null>(null);
+  const [refuelImporting, setRefuelImporting] = useState(false);
 
   const loadRefuelings = useCallback(async (currentToken: string, vehicleId = filterVehicleId) => {
     const params = new URLSearchParams();
@@ -369,6 +383,86 @@ export default function App() {
     await api("/api/users", token, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: u.id, role, active }) });
     await loadAll();
   }
+
+  async function createUser(e: FormEvent) {
+    e.preventDefault();
+    await api("/api/users", token, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newUserForm) });
+    setNewUserForm({ username: "", password: "", role: "technician" });
+    await loadAll();
+    setError("Utente creato correttamente");
+  }
+
+  async function updateSourceAssignedTo(id: number, current: string | null | undefined) {
+    if (user?.role !== "admin") return;
+    const assignedTo = window.prompt("Nuovo utilizzatore", current || "");
+    if (assignedTo === null) return;
+    await api(`/api/fuel-sources/${id}`, token, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assignedTo }) });
+    await loadAll();
+  }
+
+  async function importRefuelingsFromExcel(file: File) {
+    setRefuelImporting(true);
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array" });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      if (!firstSheet) throw new Error("File Excel non valido");
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: "" });
+      if (!rows.length) throw new Error("Nessuna riga nel file");
+
+      const sourceByLast4 = new Map<string, FuelSource>();
+      for (const src of fuelSources.filter((x) => x.active)) {
+        const last4 = last4Digits(src.identifier);
+        if (last4) sourceByLast4.set(last4, src);
+      }
+
+      let imported = 0;
+      let skipped = 0;
+      for (const row of rows) {
+        const cardRaw = String(findExcelValue(row, ["n° carta", "n carta", "numero carta", "carta", "n. carta"]) || "").trim();
+        const date = parseExcelDate(findExcelValue(row, ["data"]));
+        const amount = parseNumberish(findExcelValue(row, ["importo"]));
+        const odometerKm = parseNumberish(findExcelValue(row, ["chilometraggio", "chilometrag", "km"]));
+        const liters = parseNumberish(findExcelValue(row, ["quantità", "quantita", "qta"]));
+        const last4 = last4Digits(cardRaw);
+        const source = sourceByLast4.get(last4);
+
+        if (!source || !date || liters <= 0 || odometerKm <= 0 || amount < 0) {
+          skipped += 1;
+          continue;
+        }
+
+        const form = new FormData();
+        form.append("vehicleId", String(source.assignedTo ? (vehicles.find((v) => normalizePlate(v.plate) === normalizePlate(source.assignedTo || ""))?.id || 0) : 0));
+        // fallback: se assignedTo non è targa mezzo, usa selezione per codice contenuto in assignedTo
+        if (Number(form.get("vehicleId") || 0) <= 0) {
+          const matchVehicle = vehicles.find((v) => {
+            const hay = `${v.code} ${v.plate} ${v.model}`.toUpperCase();
+            return (source.assignedTo || "").trim() && hay.includes((source.assignedTo || "").trim().toUpperCase());
+          });
+          if (matchVehicle) form.set("vehicleId", String(matchVehicle.id));
+        }
+        if (Number(form.get("vehicleId") || 0) <= 0) {
+          skipped += 1;
+          continue;
+        }
+
+        form.append("refuelAt", date);
+        form.append("odometerKm", String(odometerKm));
+        form.append("liters", String(liters));
+        form.append("amount", String(amount));
+        form.append("sourceType", source.sourceType);
+        form.append("sourceIdentifier", source.identifier);
+        await api("/api/refuelings", token, { method: "POST", body: form });
+        imported += 1;
+      }
+
+      await loadAll();
+      setError(`Import rifornimenti completato. Importati: ${imported}. Saltati: ${skipped}.`);
+    } finally {
+      setRefuelImporting(false);
+    }
+  }
   async function updatePassword(e: FormEvent) {
     e.preventDefault();
     await api(`/api/users/${passwordForm.userId}/password`, token, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: passwordForm.password }) });
@@ -393,7 +487,7 @@ export default function App() {
   }
 
   async function editRefueling(r: Refueling) {
-    if (user?.role !== "admin" && user?.role !== "technician") return;
+    if (user?.role !== "admin") return;
     const refuelAt = window.prompt("Data (YYYY-MM-DD)", r.refuelAt.slice(0, 10));
     if (!refuelAt) return;
     const odometerKm = Number(window.prompt("Chilometri", String(r.odometerKm)));
@@ -412,7 +506,7 @@ export default function App() {
   }
 
   async function deleteRefueling(id: number) {
-    if (user?.role !== "admin" && user?.role !== "technician") return;
+    if (user?.role !== "admin") return;
     if (!window.confirm("Confermi eliminazione rifornimento?")) return;
     await api(`/api/refuelings/${id}`, token, { method: "DELETE" });
     await loadRefuelings(token, filterVehicleId);
@@ -536,7 +630,7 @@ export default function App() {
     return (
       <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
         <form onSubmit={onLogin} className="mx-auto mt-20 max-w-md space-y-3 rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
-          <h1 className="text-2xl font-bold">Accesso</h1>
+          <div className="flex items-center gap-3"><img src="/logo-bianco.png" alt="Italsem FM" className="h-10 w-auto" /><h1 className="text-2xl font-bold">Accesso</h1></div>
           <input className="w-full rounded-lg border border-slate-700 bg-slate-950 p-2" placeholder="Username" autoComplete="username" value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} />
           <input type="password" className="w-full rounded-lg border border-slate-700 bg-slate-950 p-2" placeholder="Password" autoComplete="current-password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} />
           <button className="rounded-lg bg-orange-500 px-4 py-2 font-semibold text-black">Login</button>
@@ -608,22 +702,74 @@ export default function App() {
       {tab === "Rifornimenti" && (
         <section className="space-y-4">
           <div className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-6"><select value={filterVehicleId} onChange={(e) => setFilterVehicleId(Number(e.target.value))} className="rounded bg-slate-950 p-2"><option value={0}>Tutti I Mezzi</option>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><select value={filterSourceIdentifier} onChange={(e) => setFilterSourceIdentifier(e.target.value)} className="rounded bg-slate-950 p-2"><option value="">Tutte Le Fonti</option>{fuelSources.filter((x) => x.active).map((x) => <option key={x.id} value={x.identifier}>{x.identifier} {x.assignedTo ? `- ${x.assignedTo}` : ""}</option>)}</select><input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="rounded bg-slate-950 p-2" /><input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="rounded bg-slate-950 p-2" /><button onClick={() => loadRefuelings(token, filterVehicleId)} className="rounded-lg bg-slate-700 px-3 py-2">Filtra</button><button type="button" onClick={exportRefuelingsPdf} className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Export PDF</button></div>
-          {(user.role === "admin" || user.role === "technician") && <form onSubmit={addRefueling} className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-2"><select name="vehicleId" required className="rounded bg-slate-950 p-2"><option value="">Seleziona Mezzo</option>{vehicles.filter((v) => v.active).map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><input name="refuelAt" type="date" required className="rounded bg-slate-950 p-2" /><input name="odometerKm" type="number" min="0" required className="rounded bg-slate-950 p-2" placeholder="Chilometraggio" /><input name="liters" type="number" min="0.01" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Litri" /><input name="amount" type="number" min="0" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Importo in €" /><select name="sourceType" value={refuelSourceType} onChange={(e) => setRefuelSourceType(e.target.value as "card" | "tank")} className="rounded bg-slate-950 p-2"><option value="card">Carta Carburante</option><option value="tank">Cisterna</option></select><select name="sourceIdentifier" required className="rounded bg-slate-950 p-2"><option value="">Seleziona Carta/Cisterna</option>{fuelSources.filter((x) => x.active && x.sourceType === refuelSourceType).map((x) => <option key={x.id} value={x.identifier}>{x.identifier}{x.assignedTo ? ` - ${x.assignedTo}` : ""}</option>)}</select><input name="receipt" type="file" accept="image/*,.pdf" className="rounded bg-slate-950 p-2" /><span className="self-center text-xs text-slate-400">Scontrino facoltativo</span><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black md:col-span-2">Registra Rifornimento</button></form>}
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "cons_desc")} className="rounded bg-slate-950 p-2"><option value="date_desc">Data Desc</option><option value="date_asc">Data Asc</option><option value="cons_desc">Km/L Alto</option></select><div className="mt-2 overflow-auto"><table className="min-w-full text-sm"><thead><tr><th className="text-left">Data</th><th className="text-left">Mezzo</th><th className="text-left">Fonte</th><th className="text-left">Utilizzatore</th><th className="text-left">Km</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th>{(user.role === "admin" || user.role === "technician") && <th className="text-left">Azioni</th>}</tr></thead><tbody>{sortedRefuelings.map((r) => <tr key={r.id} className="border-t border-slate-800"><td>{new Date(r.refuelAt).toLocaleDateString()}</td><td>{r.vehicleCode}</td><td>{r.sourceType === "tank" ? "Cisterna" : "Carta"} / {r.sourceIdentifier}</td><td>{r.sourceAssignedTo || "-"}</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>EUR {r.amount.toFixed(2)}</td><td>{r.consumptionKmL ? r.consumptionKmL.toFixed(2) : "-"}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td>{(user.role === "admin" || user.role === "technician") && <td><div className="flex gap-1"><button type="button" onClick={() => { void editRefueling(r); }} className="rounded bg-slate-700 px-2 py-1 text-xs">Modifica</button><button type="button" onClick={() => { void deleteRefueling(r.id); }} className="rounded bg-red-700 px-2 py-1 text-xs">Elimina</button></div></td>}</tr>)}</tbody></table></div></div>
+          {user.role === "admin" && <form onSubmit={addRefueling} className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-2"><select name="vehicleId" required className="rounded bg-slate-950 p-2"><option value="">Seleziona Mezzo</option>{vehicles.filter((v) => v.active).map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><input name="refuelAt" type="date" required className="rounded bg-slate-950 p-2" /><input name="odometerKm" type="number" min="0" required className="rounded bg-slate-950 p-2" placeholder="Chilometraggio" /><input name="liters" type="number" min="0.01" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Litri" /><input name="amount" type="number" min="0" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Importo in €" /><select name="sourceType" value={refuelSourceType} onChange={(e) => setRefuelSourceType(e.target.value as "card" | "tank")} className="rounded bg-slate-950 p-2"><option value="card">Carta Carburante</option><option value="tank">Cisterna</option></select><select name="sourceIdentifier" required className="rounded bg-slate-950 p-2"><option value="">Seleziona Carta/Cisterna</option>{fuelSources.filter((x) => x.active && x.sourceType === refuelSourceType).map((x) => <option key={x.id} value={x.identifier}>{x.identifier}{x.assignedTo ? ` - ${x.assignedTo}` : ""}</option>)}</select><input name="receipt" type="file" accept="image/*,.pdf" className="rounded bg-slate-950 p-2" /><span className="self-center text-xs text-slate-400">Scontrino facoltativo</span><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black md:col-span-2">Registra Rifornimento</button></form>}
+          {user.role === "admin" && <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Importa Rifornimenti Da Excel</h3><p className="text-xs text-slate-400">Colonne: N° CARTA, DATA, IMPORTO, CHILOMETRAGGIO, PREZZO UNITARIO, QUANTITÀ. Associazione carta per ultime 4 cifre.</p><input type="file" accept=".xlsx,.xls,.csv" className="w-full rounded bg-slate-950 p-2" onChange={(e) => setRefuelImportFile(e.target.files?.[0] || null)} /><button type="button" disabled={!refuelImportFile || refuelImporting} className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50" onClick={async () => { if (!refuelImportFile) return; try { await importRefuelingsFromExcel(refuelImportFile); setRefuelImportFile(null); } catch (err: unknown) { setError(err instanceof Error ? err.message : "Errore import rifornimenti"); } }}>IMPORTA RIFORNIMENTI</button></div>}
+
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "cons_desc")} className="rounded bg-slate-950 p-2"><option value="date_desc">Data Desc</option><option value="date_asc">Data Asc</option><option value="cons_desc">Km/L Alto</option></select><div className="mt-2 overflow-auto"><table className="min-w-full text-sm"><thead><tr><th className="text-left">Data</th><th className="text-left">Mezzo</th><th className="text-left">Fonte</th><th className="text-left">Utilizzatore</th><th className="text-left">Km</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th>{user.role === "admin" && <th className="text-left">Azioni</th>}</tr></thead><tbody>{sortedRefuelings.map((r) => <tr key={r.id} className="border-t border-slate-800"><td>{new Date(r.refuelAt).toLocaleDateString()}</td><td>{r.vehicleCode}</td><td>{r.sourceType === "tank" ? "Cisterna" : "Carta"} / {r.sourceIdentifier}</td><td>{r.sourceAssignedTo || "-"}</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>EUR {r.amount.toFixed(2)}</td><td>{r.consumptionKmL ? r.consumptionKmL.toFixed(2) : "-"}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td>{user.role === "admin" && <td><div className="flex gap-1"><button type="button" onClick={() => { void editRefueling(r); }} className="rounded bg-slate-700 px-2 py-1 text-xs">Modifica</button><button type="button" onClick={() => { void deleteRefueling(r.id); }} className="rounded bg-red-700 px-2 py-1 text-xs">Elimina</button></div></td>}</tr>)}</tbody></table></div></div>
         </section>
       )}
 
       {tab === "Carte" && (
         <section className="space-y-4">
-          {user.role === "admin" && <form onSubmit={addSource} className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-4"><select className="rounded bg-slate-950 p-2" value={sourceForm.sourceType} onChange={(e) => setSourceForm({ ...sourceForm, sourceType: e.target.value as "card" | "tank" })}><option value="card">Carta Carburante</option><option value="tank">Cisterna</option></select><input className="rounded bg-slate-950 p-2" placeholder="Identificativo" value={sourceForm.identifier} onChange={(e) => setSourceForm({ ...sourceForm, identifier: e.target.value })} /><input className="rounded bg-slate-950 p-2" placeholder="Utilizzatore" value={sourceForm.assignedTo} onChange={(e) => setSourceForm({ ...sourceForm, assignedTo: e.target.value })} /><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Aggiungi</button></form>}
+          {user.role === "admin" && (
+            <form onSubmit={addSource} className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-4">
+              <select className="rounded bg-slate-950 p-2" value={sourceForm.sourceType} onChange={(e) => setSourceForm({ ...sourceForm, sourceType: e.target.value as "card" | "tank" })}>
+                <option value="card">Carta Carburante</option>
+                <option value="tank">Cisterna</option>
+              </select>
+              <input className="rounded bg-slate-950 p-2" placeholder="Identificativo" value={sourceForm.identifier} onChange={(e) => setSourceForm({ ...sourceForm, identifier: e.target.value })} />
+              <input className="rounded bg-slate-950 p-2" placeholder="Utilizzatore" value={sourceForm.assignedTo} onChange={(e) => setSourceForm({ ...sourceForm, assignedTo: e.target.value })} />
+              <button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Aggiungi</button>
+            </form>
+          )}
+
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="mb-2 font-semibold">Carte Carburante</h3><div className="space-y-2 text-sm">{cards.length === 0 && <div className="text-slate-400">Nessuna carta</div>}{cards.map((c) => <div key={c.id} className="flex items-center justify-between rounded border border-slate-800 p-2"><div><div className="font-medium">{c.identifier}</div><div className="text-xs text-slate-400">Utilizzatore: {c.assignedTo || "-"}</div></div>{user.role === "admin" && <button type="button" className="rounded bg-red-700 px-2 py-1 text-xs" onClick={() => { void deleteSource(c.id); }}>Rimuovi</button>}</div>)}</div></div>
-            <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="mb-2 font-semibold">Cisterne</h3><div className="space-y-2 text-sm">{tanks.length === 0 && <div className="text-slate-400">Nessuna cisterna</div>}{tanks.map((c) => <div key={c.id} className="flex items-center justify-between rounded border border-slate-800 p-2"><div><div className="font-medium">{c.identifier}</div><div className="text-xs text-slate-400">Utilizzatore: {c.assignedTo || "-"}</div></div>{user.role === "admin" && <button type="button" className="rounded bg-red-700 px-2 py-1 text-xs" onClick={() => { void deleteSource(c.id); }}>Rimuovi</button>}</div>)}</div></div>
+            <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+              <h3 className="mb-2 font-semibold">Carte Carburante</h3>
+              <div className="space-y-2 text-sm">
+                {cards.length === 0 && <div className="text-slate-400">Nessuna carta</div>}
+                {cards.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between rounded border border-slate-800 p-2">
+                    <div>
+                      <div className="font-medium">{c.identifier}</div>
+                      <div className="text-xs text-slate-400">Utilizzatore: {c.assignedTo || "-"}</div>
+                    </div>
+                    {user.role === "admin" && (
+                      <div className="flex gap-1">
+                        <button type="button" className="rounded bg-slate-700 px-2 py-1 text-xs" onClick={() => { void updateSourceAssignedTo(c.id, c.assignedTo); }}>Modifica</button>
+                        <button type="button" className="rounded bg-red-700 px-2 py-1 text-xs" onClick={() => { void deleteSource(c.id); }}>Rimuovi</button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+              <h3 className="mb-2 font-semibold">Cisterne</h3>
+              <div className="space-y-2 text-sm">
+                {tanks.length === 0 && <div className="text-slate-400">Nessuna cisterna</div>}
+                {tanks.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between rounded border border-slate-800 p-2">
+                    <div>
+                      <div className="font-medium">{c.identifier}</div>
+                      <div className="text-xs text-slate-400">Utilizzatore: {c.assignedTo || "-"}</div>
+                    </div>
+                    {user.role === "admin" && (
+                      <div className="flex gap-1">
+                        <button type="button" className="rounded bg-slate-700 px-2 py-1 text-xs" onClick={() => { void updateSourceAssignedTo(c.id, c.assignedTo); }}>Modifica</button>
+                        <button type="button" className="rounded bg-red-700 px-2 py-1 text-xs" onClick={() => { void deleteSource(c.id); }}>Rimuovi</button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </section>
       )}
 
-      {tab === "Utenti" && user.role === "admin" && <section className="space-y-4"><div className="rounded-xl border border-slate-700 bg-slate-900 p-4">{users.map((u) => <div key={u.id} className="mb-2 grid gap-2 border-b border-slate-800 pb-2 md:grid-cols-5"><div>{u.username}</div><select defaultValue={u.role} onChange={(e) => saveUser(u, e.target.value as Role, u.active === 1)} className="rounded bg-slate-950 p-2"><option value="admin">Admin</option><option value="technician">Technician</option><option value="accounting">Accounting</option></select><button onClick={() => saveUser(u, u.role, u.active !== 1)} className="rounded bg-slate-700 px-2 py-1">{u.active ? "Disattiva" : "Attiva"}</button><div>{new Date(u.created_at).toLocaleDateString()}</div><div>{u.active ? "Attivo" : "Disattivo"}</div></div>)}</div><form onSubmit={updatePassword} className="max-w-xl space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h4 className="font-semibold">Modifica Password Utente</h4><select value={passwordForm.userId} onChange={(e) => setPasswordForm({ ...passwordForm, userId: Number(e.target.value) })} className="w-full rounded bg-slate-950 p-2"><option value={0}>Seleziona Utente</option>{users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}</select><input type="password" minLength={6} required value={passwordForm.password} onChange={(e) => setPasswordForm({ ...passwordForm, password: e.target.value })} className="w-full rounded bg-slate-950 p-2" placeholder="Nuova Password (Min 6)" /><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Aggiorna Password</button></form></section>}
+      {tab === "Utenti" && user.role === "admin" && <section className="space-y-4"><form onSubmit={createUser} className="max-w-xl space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h4 className="font-semibold">Crea Nuovo Utente</h4><input required className="w-full rounded bg-slate-950 p-2" placeholder="Username" value={newUserForm.username} onChange={(e) => setNewUserForm({ ...newUserForm, username: e.target.value })} /><input type="password" minLength={6} required className="w-full rounded bg-slate-950 p-2" placeholder="Password (min 6)" value={newUserForm.password} onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })} /><select className="w-full rounded bg-slate-950 p-2" value={newUserForm.role} onChange={(e) => setNewUserForm({ ...newUserForm, role: e.target.value as "admin" | "technician" })}><option value="technician">Tecnico (consultazione/export)</option><option value="admin">Admin (tutto)</option></select><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Crea Utente</button></form><div className="rounded-xl border border-slate-700 bg-slate-900 p-4">{users.map((u) => <div key={u.id} className="mb-2 grid gap-2 border-b border-slate-800 pb-2 md:grid-cols-5"><div>{u.username}</div><select defaultValue={u.role} onChange={(e) => saveUser(u, e.target.value as Role, u.active === 1)} className="rounded bg-slate-950 p-2"><option value="admin">Admin</option><option value="technician">Technician</option></select><button onClick={() => saveUser(u, u.role, u.active !== 1)} className="rounded bg-slate-700 px-2 py-1">{u.active ? "Disattiva" : "Attiva"}</button><div>{new Date(u.created_at).toLocaleDateString()}</div><div>{u.active ? "Attivo" : "Disattivo"}</div></div>)}</div><form onSubmit={updatePassword} className="max-w-xl space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h4 className="font-semibold">Modifica Password Utente</h4><select value={passwordForm.userId} onChange={(e) => setPasswordForm({ ...passwordForm, userId: Number(e.target.value) })} className="w-full rounded bg-slate-950 p-2"><option value={0}>Seleziona Utente</option>{users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}</select><input type="password" minLength={6} required value={passwordForm.password} onChange={(e) => setPasswordForm({ ...passwordForm, password: e.target.value })} className="w-full rounded bg-slate-950 p-2" placeholder="Nuova Password (Min 6)" /><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Aggiorna Password</button></form></section>}
 
       {modalOpen && vehicleDetail && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4">

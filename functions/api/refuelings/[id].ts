@@ -19,7 +19,7 @@ export const onRequestPatch: PagesFunction<{ DB: D1Database }> = async ({ reques
   await ensureCoreTables(env.DB);
   const auth = await requireAuth(request, env.DB);
   if (auth instanceof Response) return auth;
-  const denied = requireRole(auth, ["admin", "technician"]);
+  const denied = requireRole(auth, ["admin"]);
   if (denied) return denied;
 
   const id = Number(params.id);
@@ -109,7 +109,7 @@ export const onRequestDelete: PagesFunction<{ DB: D1Database; PHOTOS?: R2Bucket 
   await ensureCoreTables(env.DB);
   const auth = await requireAuth(request, env.DB);
   if (auth instanceof Response) return auth;
-  const denied = requireRole(auth, ["admin", "technician"]);
+  const denied = requireRole(auth, ["admin"]);
   if (denied) return denied;
 
   const id = Number(params.id);

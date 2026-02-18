@@ -77,7 +77,7 @@ export const onRequestPost: PagesFunction<{ DB: D1Database; PHOTOS: R2Bucket }> 
     await ensureCoreTables(env.DB);
     const auth = await requireAuth(request, env.DB);
     if (auth instanceof Response) return auth;
-    const denied = requireRole(auth, ["admin", "technician"]);
+    const denied = requireRole(auth, ["admin"]);
     if (denied) return denied;
 
     const form = await request.formData();
@@ -94,9 +94,26 @@ export const onRequestPost: PagesFunction<{ DB: D1Database; PHOTOS: R2Bucket }> 
     return Response.json({ ok: false, error: "Dati rifornimento non validi" }, { status: 400 });
   }
 
-  const prev = await env.DB.prepare("SELECT odometer_km as km FROM fuel_events WHERE vehicle_id = ? ORDER BY refuel_at DESC LIMIT 1").bind(vehicleId).first<{ km: number }>();
+  const prev = await env.DB.prepare(`
+    SELECT odometer_km as km
+    FROM fuel_events
+    WHERE vehicle_id = ? AND refuel_at < ?
+    ORDER BY refuel_at DESC
+    LIMIT 1
+  `).bind(vehicleId, refuelAt).first<{ km: number }>();
   if (prev && odometerKm < prev.km) {
-    return Response.json({ ok: false, error: "Il chilometraggio non può essere decrescente" }, { status: 400 });
+    return Response.json({ ok: false, error: "Il chilometraggio non può essere inferiore al rifornimento precedente" }, { status: 400 });
+  }
+
+  const next = await env.DB.prepare(`
+    SELECT odometer_km as km
+    FROM fuel_events
+    WHERE vehicle_id = ? AND refuel_at > ?
+    ORDER BY refuel_at ASC
+    LIMIT 1
+  `).bind(vehicleId, refuelAt).first<{ km: number }>();
+  if (next && odometerKm > next.km) {
+    return Response.json({ ok: false, error: "Il chilometraggio non può superare il rifornimento successivo" }, { status: 400 });
   }
 
   let receiptKey: string | null = null;
