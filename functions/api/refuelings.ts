@@ -14,6 +14,11 @@ function normalizeRefuelDate(input: string) {
   return "";
 }
 
+async function hasFuelEventsColumn(db: D1Database, column: string) {
+  const info = await db.prepare("PRAGMA table_info(fuel_events)").all<{ name: string }>();
+  return (info.results || []).some((c) => c.name === column);
+}
+
 function isUploadFile(value: FormDataEntryValue | null): value is File {
   return Boolean(
     value
@@ -99,10 +104,18 @@ export const onRequestPost: PagesFunction<{ DB: D1Database; PHOTOS: R2Bucket }> 
     });
   }
 
-  await env.DB.prepare(`
-    INSERT INTO fuel_events(vehicle_id, refuel_at, odometer_km, liters, amount, source_type, source_identifier, receipt_key, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(vehicleId, refuelAt, odometerKm, liters, amount, sourceType, sourceIdentifier, receiptKey, auth.userId).run();
+  const hasLegacyDate = await hasFuelEventsColumn(env.DB, "date");
+  if (hasLegacyDate) {
+    await env.DB.prepare(`
+      INSERT INTO fuel_events(vehicle_id, refuel_at, date, odometer_km, liters, amount, source_type, source_identifier, receipt_key, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(vehicleId, refuelAt, refuelAt.slice(0, 10), odometerKm, liters, amount, sourceType, sourceIdentifier, receiptKey, auth.userId).run();
+  } else {
+    await env.DB.prepare(`
+      INSERT INTO fuel_events(vehicle_id, refuel_at, odometer_km, liters, amount, source_type, source_identifier, receipt_key, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(vehicleId, refuelAt, odometerKm, liters, amount, sourceType, sourceIdentifier, receiptKey, auth.userId).run();
+  }
 
     return Response.json({ ok: true });
   } catch (e: unknown) {

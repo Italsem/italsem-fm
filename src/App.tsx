@@ -187,6 +187,8 @@ export default function App() {
   const [editVehicleForm, setEditVehicleForm] = useState({ model: "", description: "" });
   const [deadlineForm, setDeadlineForm] = useState<Record<DeadlineType, string>>({ bollo: "", revisione: "", rca: "", tachigrafo: "", periodica_gru: "", strutturale: "" });
   const [enabledOptionalDeadlines, setEnabledOptionalDeadlines] = useState<DeadlineType[]>([]);
+  const [excelImportFile, setExcelImportFile] = useState<File | null>(null);
+  const [excelImporting, setExcelImporting] = useState(false);
 
   const loadRefuelings = useCallback(async (currentToken: string, vehicleId = filterVehicleId) => {
     const params = new URLSearchParams();
@@ -278,7 +280,9 @@ export default function App() {
     await loadAll();
   }
   async function importDeadlinesFromExcel(file: File) {
-    const data = await file.arrayBuffer();
+    setExcelImporting(true);
+    try {
+      const data = await file.arrayBuffer();
     const workbook = XLSX.read(data, { type: "array" });
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     if (!firstSheet) throw new Error("File Excel vuoto o non valido");
@@ -286,7 +290,8 @@ export default function App() {
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: "" });
     if (!rows.length) throw new Error("Nessuna riga trovata nel file Excel");
 
-    const byPlate = new Map(vehicles.map((v) => [normalizePlate(v.plate), v]));
+    const vehiclesForImport = await api<{ data: Vehicle[] }>("/api/vehicles?search=&active=all", token);
+    const byPlate = new Map(vehiclesForImport.data.map((v) => [normalizePlate(v.plate), v]));
     let updated = 0;
     let skipped = 0;
 
@@ -323,7 +328,10 @@ export default function App() {
     }
 
     await loadAll();
-    setError(`Import Excel completato. Mezzi aggiornati: ${updated}. Righe saltate: ${skipped}.`);
+    setError(`Importazione Excel completata. Mezzi aggiornati: ${updated}. Righe saltate: ${skipped}.`);
+    } finally {
+      setExcelImporting(false);
+    }
   }
 
   async function saveUser(u: UserAdmin, role: Role, active: boolean) {
@@ -490,7 +498,7 @@ export default function App() {
           <div className="grid gap-4 md:grid-cols-3">
             {user.role === "admin" && <form onSubmit={addVehicle} className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Nuovo Mezzo</h3><input required className="w-full rounded bg-slate-950 p-2" placeholder="Codice" value={vehicleForm.code} onChange={(e) => setVehicleForm({ ...vehicleForm, code: e.target.value })} /><input required className="w-full rounded bg-slate-950 p-2" placeholder="Targa" value={vehicleForm.plate} onChange={(e) => setVehicleForm({ ...vehicleForm, plate: e.target.value })} /><input required className="w-full rounded bg-slate-950 p-2" placeholder="Modello" value={vehicleForm.model} onChange={(e) => setVehicleForm({ ...vehicleForm, model: e.target.value })} /><input className="w-full rounded bg-slate-950 p-2" placeholder="Descrizione" value={vehicleForm.description} onChange={(e) => setVehicleForm({ ...vehicleForm, description: e.target.value })} /><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Aggiungi Mezzo</button></form>}
             {user.role === "admin" && <form onSubmit={addSource} className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Nuova Carta/Cisterna</h3><select className="w-full rounded bg-slate-950 p-2" value={sourceForm.sourceType} onChange={(e) => setSourceForm({ ...sourceForm, sourceType: e.target.value })}><option value="card">Carta Carburante</option><option value="tank">Cisterna</option></select><input className="w-full rounded bg-slate-950 p-2" placeholder="Identificativo" value={sourceForm.identifier} onChange={(e) => setSourceForm({ ...sourceForm, identifier: e.target.value })} /><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Salva</button></form>}
-            {user.role === "admin" && <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Importa Scadenze Da Excel</h3><p className="text-xs text-slate-400">Colonne supportate: Targa, Revisione, Assicurazione/RCA, Bollo, Tachigrafo, Periodica Gru, Strutturale</p><input type="file" accept=".xlsx,.xls,.csv" className="w-full rounded bg-slate-950 p-2" onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; try { await importDeadlinesFromExcel(file); } catch (err: unknown) { setError(err instanceof Error ? err.message : "Errore import Excel"); } e.currentTarget.value = ""; }} /></div>}
+            {user.role === "admin" && <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Importa Scadenze Da Excel</h3><p className="text-xs text-slate-400">Colonne supportate: Targa, Revisione, Assicurazione/RCA, Bollo, Tachigrafo, Periodica Gru, Strutturale</p><input type="file" accept=".xlsx,.xls,.csv" className="w-full rounded bg-slate-950 p-2" onChange={(e) => setExcelImportFile(e.target.files?.[0] || null)} /><button type="button" disabled={!excelImportFile || excelImporting} className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50" onClick={async () => { if (!excelImportFile) return; try { await importDeadlinesFromExcel(excelImportFile); setExcelImportFile(null); } catch (err: unknown) { setError(err instanceof Error ? err.message : "Errore import Excel"); } }}>IMPORTA EXCEL</button></div>}
           </div>
         </section>
       )}
