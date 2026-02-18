@@ -19,6 +19,22 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
           plate,
           COALESCE(NULLIF(model,''), 'Senza modello') as model,
           description,
+          photo_key as photo_key,
+          (
+            SELECT COUNT(*)
+            FROM vehicle_deadlines vd
+            WHERE vd.vehicle_id = vehicles.id AND julianday(vd.due_date) >= julianday('now') + 30
+          ) as deadlineValid,
+          (
+            SELECT COUNT(*)
+            FROM vehicle_deadlines vd
+            WHERE vd.vehicle_id = vehicles.id AND julianday(vd.due_date) >= julianday('now') AND julianday(vd.due_date) < julianday('now') + 30
+          ) as deadlineWarning,
+          (
+            SELECT COUNT(*)
+            FROM vehicle_deadlines vd
+            WHERE vd.vehicle_id = vehicles.id AND julianday(vd.due_date) < julianday('now')
+          ) as deadlineExpired,
           COALESCE(active,1) as active
         FROM vehicles
         WHERE (
@@ -66,10 +82,4 @@ export const onRequestPost: PagesFunction<{ DB: D1Database }> = async ({ request
   } catch (e: unknown) {
     return Response.json({ ok: false, error: e instanceof Error ? e.message : "Errore creazione mezzo" }, { status: 500 });
   }
-
-  await env.DB.prepare("INSERT INTO vehicles(code, plate, model, description, active) VALUES (?, ?, ?, ?, 1)")
-    .bind(code, plate, model, description || null)
-    .run();
-
-  return Response.json({ ok: true });
 };
