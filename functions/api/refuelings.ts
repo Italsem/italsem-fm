@@ -41,25 +41,29 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
     const vehicleId = Number(url.searchParams.get("vehicleId") || "0");
     const from = url.searchParams.get("from") || "";
     const to = url.searchParams.get("to") || "";
+    const sourceIdentifier = String(url.searchParams.get("sourceIdentifier") || "").trim().toUpperCase();
 
     const { results } = await env.DB.prepare(`
     SELECT fe.id, fe.vehicle_id as vehicleId, v.code as vehicleCode, v.plate, v.model,
       fe.refuel_at as refuelAt, fe.odometer_km as odometerKm, fe.liters, fe.amount,
-      fe.source_type as sourceType, fe.source_identifier as sourceIdentifier, fe.receipt_key as receiptKey,
-      (
-        SELECT ((fe.liters * 100.0) / NULLIF((fe.odometer_km - prev.odometer_km), 0))
-        FROM fuel_events prev
-        WHERE prev.vehicle_id = fe.vehicle_id AND prev.refuel_at < fe.refuel_at
-        ORDER BY prev.refuel_at DESC
-        LIMIT 1
-      ) as consumptionL100km
+      fe.source_type as sourceType, fe.source_identifier as sourceIdentifier, fs.assigned_to as sourceAssignedTo, fe.receipt_key as receiptKey,
+      CASE WHEN (fe.odometer_km - prev.odometer_km) > 0 AND fe.liters > 0 THEN (fe.odometer_km - prev.odometer_km) / fe.liters ELSE NULL END as consumptionKmL,
+      CASE WHEN (fe.odometer_km - prev.odometer_km) > 0 AND fe.liters > 0 THEN (fe.liters * 100.0) / (fe.odometer_km - prev.odometer_km) ELSE NULL END as consumptionL100km
     FROM fuel_events fe
     JOIN vehicles v ON v.id = fe.vehicle_id
+    LEFT JOIN fuel_sources fs ON fs.identifier = fe.source_identifier
+    LEFT JOIN fuel_events prev ON prev.id = (
+      SELECT p.id FROM fuel_events p
+      WHERE p.vehicle_id = fe.vehicle_id AND p.refuel_at < fe.refuel_at
+      ORDER BY p.refuel_at DESC
+      LIMIT 1
+    )
     WHERE (? = 0 OR fe.vehicle_id = ?)
       AND (? = '' OR fe.refuel_at >= ?)
       AND (? = '' OR fe.refuel_at <= ?)
+      AND (? = '' OR UPPER(COALESCE(fe.source_identifier,'')) = ?)
     ORDER BY fe.refuel_at DESC
-  `).bind(vehicleId, vehicleId, from, from, to, to).all();
+  `).bind(vehicleId, vehicleId, from, from, to, to, sourceIdentifier, sourceIdentifier).all();
 
     return Response.json({ ok: true, data: results });
   } catch (e: unknown) {

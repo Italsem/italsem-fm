@@ -43,17 +43,19 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
 
   const history = await env.DB
     .prepare(`
-      SELECT id, refuel_at as refuelAt, odometer_km as odometerKm, liters, amount, source_type as sourceType,
-        (
-          SELECT ((fe.liters * 100.0) / NULLIF((fe.odometer_km - prev.odometer_km), 0))
-          FROM fuel_events prev
-          WHERE prev.vehicle_id = fe.vehicle_id AND prev.refuel_at < fe.refuel_at
-          ORDER BY prev.refuel_at DESC
-          LIMIT 1
-        ) as consumptionL100km
+      SELECT fe.id, fe.refuel_at as refuelAt, fe.odometer_km as odometerKm, fe.liters, fe.amount,
+        fe.source_type as sourceType, fe.source_identifier as sourceIdentifier,
+        CASE WHEN (fe.odometer_km - prev.odometer_km) > 0 AND fe.liters > 0 THEN (fe.odometer_km - prev.odometer_km) / fe.liters ELSE NULL END as consumptionKmL,
+        CASE WHEN (fe.odometer_km - prev.odometer_km) > 0 AND fe.liters > 0 THEN (fe.liters * 100.0) / (fe.odometer_km - prev.odometer_km) ELSE NULL END as consumptionL100km
       FROM fuel_events fe
-      WHERE vehicle_id = ?
-      ORDER BY refuel_at DESC
+      LEFT JOIN fuel_events prev ON prev.id = (
+        SELECT p.id FROM fuel_events p
+        WHERE p.vehicle_id = fe.vehicle_id AND p.refuel_at < fe.refuel_at
+        ORDER BY p.refuel_at DESC
+        LIMIT 1
+      )
+      WHERE fe.vehicle_id = ?
+      ORDER BY fe.refuel_at DESC
     `)
     .bind(id)
     .all();
