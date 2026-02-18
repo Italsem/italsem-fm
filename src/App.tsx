@@ -141,7 +141,7 @@ function parseExcelDate(value: unknown): string {
   const raw = String(value || "").trim();
   if (!raw) return "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  const m = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  const m = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/);
   if (m) {
     return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
   }
@@ -219,6 +219,7 @@ export default function App() {
   const [documentType, setDocumentType] = useState<VehicleDocumentType>("libretto");
   const [refuelSourceType, setRefuelSourceType] = useState<"card" | "tank">("card");
   const [refuelImportFile, setRefuelImportFile] = useState<File | null>(null);
+  const [refuelImportVehicleId, setRefuelImportVehicleId] = useState<number>(0);
   const [refuelImporting, setRefuelImporting] = useState(false);
 
   const loadRefuelings = useCallback(async (currentToken: string, vehicleId = filterVehicleId) => {
@@ -401,6 +402,9 @@ export default function App() {
   }
 
   async function importRefuelingsFromExcel(file: File) {
+    if (!refuelImportVehicleId) {
+      throw new Error("Seleziona il mezzo per l'importazione");
+    }
     setRefuelImporting(true);
     try {
       const data = await file.arrayBuffer();
@@ -416,6 +420,9 @@ export default function App() {
         if (last4) sourceByLast4.set(last4, src);
       }
 
+      const existing = await api<{ data: Refueling[] }>(`/api/refuelings?vehicleId=${refuelImportVehicleId}&from=2000-01-01T00:00&to=2100-12-31T23:59`, token);
+      const existingKeys = new Set(existing.data.map((r) => `${r.vehicleId}|${r.refuelAt.slice(0, 10)}|${Math.round(r.odometerKm)}|${r.sourceIdentifier}`));
+
       let imported = 0;
       let skipped = 0;
       for (const row of rows) {
@@ -424,45 +431,40 @@ export default function App() {
         const amount = parseNumberish(findExcelValue(row, ["importo"]));
         const odometerKm = parseNumberish(findExcelValue(row, ["chilometraggio", "chilometrag", "km"]));
         const liters = parseNumberish(findExcelValue(row, ["quantità", "quantita", "qta"]));
-        const last4 = last4Digits(cardRaw);
-        const source = sourceByLast4.get(last4);
 
+        const source = sourceByLast4.get(last4Digits(cardRaw));
         if (!source || !date || liters <= 0 || odometerKm <= 0 || amount < 0) {
           skipped += 1;
           continue;
         }
 
-        const form = new FormData();
-        form.append("vehicleId", String(source.assignedTo ? (vehicles.find((v) => normalizePlate(v.plate) === normalizePlate(source.assignedTo || ""))?.id || 0) : 0));
-        // fallback: se assignedTo non è targa mezzo, usa selezione per codice contenuto in assignedTo
-        if (Number(form.get("vehicleId") || 0) <= 0) {
-          const matchVehicle = vehicles.find((v) => {
-            const hay = `${v.code} ${v.plate} ${v.model}`.toUpperCase();
-            return (source.assignedTo || "").trim() && hay.includes((source.assignedTo || "").trim().toUpperCase());
-          });
-          if (matchVehicle) form.set("vehicleId", String(matchVehicle.id));
-        }
-        if (Number(form.get("vehicleId") || 0) <= 0) {
+        const key = `${refuelImportVehicleId}|${date}|${Math.round(odometerKm)}|${source.identifier}`;
+        if (existingKeys.has(key)) {
           skipped += 1;
           continue;
         }
 
+        const form = new FormData();
+        form.append("vehicleId", String(refuelImportVehicleId));
         form.append("refuelAt", date);
         form.append("odometerKm", String(odometerKm));
         form.append("liters", String(liters));
         form.append("amount", String(amount));
         form.append("sourceType", source.sourceType);
         form.append("sourceIdentifier", source.identifier);
+
         await api("/api/refuelings", token, { method: "POST", body: form });
+        existingKeys.add(key);
         imported += 1;
       }
 
       await loadAll();
-      setError(`Import rifornimenti completato. Importati: ${imported}. Saltati: ${skipped}.`);
+      setError(`Importazione rifornimenti completata. Importati: ${imported}. Saltati: ${skipped}.`);
     } finally {
       setRefuelImporting(false);
     }
   }
+
   async function updatePassword(e: FormEvent) {
     e.preventDefault();
     await api(`/api/users/${passwordForm.userId}/password`, token, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: passwordForm.password }) });
@@ -703,7 +705,7 @@ export default function App() {
         <section className="space-y-4">
           <div className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-6"><select value={filterVehicleId} onChange={(e) => setFilterVehicleId(Number(e.target.value))} className="rounded bg-slate-950 p-2"><option value={0}>Tutti I Mezzi</option>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><select value={filterSourceIdentifier} onChange={(e) => setFilterSourceIdentifier(e.target.value)} className="rounded bg-slate-950 p-2"><option value="">Tutte Le Fonti</option>{fuelSources.filter((x) => x.active).map((x) => <option key={x.id} value={x.identifier}>{x.identifier} {x.assignedTo ? `- ${x.assignedTo}` : ""}</option>)}</select><input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="rounded bg-slate-950 p-2" /><input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="rounded bg-slate-950 p-2" /><button onClick={() => loadRefuelings(token, filterVehicleId)} className="rounded-lg bg-slate-700 px-3 py-2">Filtra</button><button type="button" onClick={exportRefuelingsPdf} className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Export PDF</button></div>
           {user.role === "admin" && <form onSubmit={addRefueling} className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-2"><select name="vehicleId" required className="rounded bg-slate-950 p-2"><option value="">Seleziona Mezzo</option>{vehicles.filter((v) => v.active).map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><input name="refuelAt" type="date" required className="rounded bg-slate-950 p-2" /><input name="odometerKm" type="number" min="0" required className="rounded bg-slate-950 p-2" placeholder="Chilometraggio" /><input name="liters" type="number" min="0.01" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Litri" /><input name="amount" type="number" min="0" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Importo in €" /><select name="sourceType" value={refuelSourceType} onChange={(e) => setRefuelSourceType(e.target.value as "card" | "tank")} className="rounded bg-slate-950 p-2"><option value="card">Carta Carburante</option><option value="tank">Cisterna</option></select><select name="sourceIdentifier" required className="rounded bg-slate-950 p-2"><option value="">Seleziona Carta/Cisterna</option>{fuelSources.filter((x) => x.active && x.sourceType === refuelSourceType).map((x) => <option key={x.id} value={x.identifier}>{x.identifier}{x.assignedTo ? ` - ${x.assignedTo}` : ""}</option>)}</select><input name="receipt" type="file" accept="image/*,.pdf" className="rounded bg-slate-950 p-2" /><span className="self-center text-xs text-slate-400">Scontrino facoltativo</span><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black md:col-span-2">Registra Rifornimento</button></form>}
-          {user.role === "admin" && <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Importa Rifornimenti Da Excel</h3><p className="text-xs text-slate-400">Colonne: N° CARTA, DATA, IMPORTO, CHILOMETRAGGIO, PREZZO UNITARIO, QUANTITÀ. Associazione carta per ultime 4 cifre.</p><input type="file" accept=".xlsx,.xls,.csv" className="w-full rounded bg-slate-950 p-2" onChange={(e) => setRefuelImportFile(e.target.files?.[0] || null)} /><button type="button" disabled={!refuelImportFile || refuelImporting} className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50" onClick={async () => { if (!refuelImportFile) return; try { await importRefuelingsFromExcel(refuelImportFile); setRefuelImportFile(null); } catch (err: unknown) { setError(err instanceof Error ? err.message : "Errore import rifornimenti"); } }}>IMPORTA RIFORNIMENTI</button></div>}
+          {user.role === "admin" && <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Importa Rifornimenti Da Excel</h3><p className="text-xs text-slate-400">Colonne: N° CARTA, DATA, IMPORTO, CHILOMETRAGGIO, PREZZO UNITARIO, QUANTITÀ. Associazione carta per ultime 4 cifre.</p><select className="w-full rounded bg-slate-950 p-2" value={refuelImportVehicleId} onChange={(e) => setRefuelImportVehicleId(Number(e.target.value))}><option value={0}>Seleziona Mezzo Per Import</option>{vehicles.filter((v) => v.active).map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><input type="file" accept=".xlsx,.xls,.csv" className="w-full rounded bg-slate-950 p-2" onChange={(e) => setRefuelImportFile(e.target.files?.[0] || null)} /><button type="button" disabled={!refuelImportFile || !refuelImportVehicleId || refuelImporting} className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50" onClick={async () => { if (!refuelImportFile || !refuelImportVehicleId) return; try { await importRefuelingsFromExcel(refuelImportFile); setRefuelImportFile(null); } catch (err: unknown) { setError(err instanceof Error ? err.message : "Errore import rifornimenti"); } }}>IMPORTA RIFORNIMENTI</button></div>}
 
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "cons_desc")} className="rounded bg-slate-950 p-2"><option value="date_desc">Data Desc</option><option value="date_asc">Data Asc</option><option value="cons_desc">Km/L Alto</option></select><div className="mt-2 overflow-auto"><table className="min-w-full text-sm"><thead><tr><th className="text-left">Data</th><th className="text-left">Mezzo</th><th className="text-left">Fonte</th><th className="text-left">Utilizzatore</th><th className="text-left">Km</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th>{user.role === "admin" && <th className="text-left">Azioni</th>}</tr></thead><tbody>{sortedRefuelings.map((r) => <tr key={r.id} className="border-t border-slate-800"><td>{new Date(r.refuelAt).toLocaleDateString()}</td><td>{r.vehicleCode}</td><td>{r.sourceType === "tank" ? "Cisterna" : "Carta"} / {r.sourceIdentifier}</td><td>{r.sourceAssignedTo || "-"}</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>EUR {r.amount.toFixed(2)}</td><td>{r.consumptionKmL ? r.consumptionKmL.toFixed(2) : "-"}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td>{user.role === "admin" && <td><div className="flex gap-1"><button type="button" onClick={() => { void editRefueling(r); }} className="rounded bg-slate-700 px-2 py-1 text-xs">Modifica</button><button type="button" onClick={() => { void deleteRefueling(r.id); }} className="rounded bg-red-700 px-2 py-1 text-xs">Elimina</button></div></td>}</tr>)}</tbody></table></div></div>
         </section>
