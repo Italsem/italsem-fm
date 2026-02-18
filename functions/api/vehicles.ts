@@ -19,6 +19,21 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
           plate,
           COALESCE(NULLIF(model,''), 'Senza modello') as model,
           description,
+          (
+            SELECT COUNT(*)
+            FROM vehicle_deadlines vd
+            WHERE vd.vehicle_id = vehicles.id AND julianday(vd.due_date) >= julianday('now') + 30
+          ) as deadlineValid,
+          (
+            SELECT COUNT(*)
+            FROM vehicle_deadlines vd
+            WHERE vd.vehicle_id = vehicles.id AND julianday(vd.due_date) >= julianday('now') AND julianday(vd.due_date) < julianday('now') + 30
+          ) as deadlineWarning,
+          (
+            SELECT COUNT(*)
+            FROM vehicle_deadlines vd
+            WHERE vd.vehicle_id = vehicles.id AND julianday(vd.due_date) < julianday('now')
+          ) as deadlineExpired,
           COALESCE(active,1) as active
         FROM vehicles
         WHERE (
