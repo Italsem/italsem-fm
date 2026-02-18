@@ -12,25 +12,25 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
       SELECT
         COALESCE(SUM(liters), 0) as totalLiters,
         COALESCE(SUM(amount), 0) as totalAmount,
-        COALESCE(AVG(consumption), 0) as avgConsumption
+        COALESCE(AVG(consumption), 0) as avgConsumptionKmL
       FROM (
         SELECT fe.liters, fe.amount,
         (
-          SELECT ((fe.liters * 100.0) / NULLIF((fe.odometer_km - prev.odometer_km),0))
+          SELECT (NULLIF((fe.odometer_km - prev.odometer_km),0) / NULLIF(fe.liters,0))
           FROM fuel_events prev
           WHERE prev.vehicle_id = fe.vehicle_id AND prev.refuel_at < fe.refuel_at
           ORDER BY prev.refuel_at DESC LIMIT 1
         ) as consumption
         FROM fuel_events fe
       )
-    `).first<{ totalLiters: number; totalAmount: number; avgConsumption: number }>();
+    `).first<{ totalLiters: number; totalAmount: number; avgConsumptionKmL: number }>();
 
     const highConsumption = await env.DB.prepare(`
       SELECT v.id, v.code, v.plate, v.model, AVG(sub.c) as avgConsumption
       FROM (
         SELECT fe.vehicle_id,
         (
-          SELECT ((fe.liters * 100.0) / NULLIF((fe.odometer_km - prev.odometer_km),0))
+          SELECT (NULLIF((fe.odometer_km - prev.odometer_km),0) / NULLIF(fe.liters,0))
           FROM fuel_events prev
           WHERE prev.vehicle_id = fe.vehicle_id AND prev.refuel_at < fe.refuel_at
           ORDER BY prev.refuel_at DESC LIMIT 1
@@ -56,7 +56,7 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
       FROM (
         SELECT fe.vehicle_id,
         (
-          SELECT ((fe.liters * 100.0) / NULLIF((fe.odometer_km - prev.odometer_km),0))
+          SELECT (NULLIF((fe.odometer_km - prev.odometer_km),0) / NULLIF(fe.liters,0))
           FROM fuel_events prev
           WHERE prev.vehicle_id = fe.vehicle_id AND prev.refuel_at < fe.refuel_at
           ORDER BY prev.refuel_at DESC LIMIT 1
@@ -74,7 +74,7 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
       data: {
         totalLiters: totals?.totalLiters || 0,
         totalAmount: totals?.totalAmount || 0,
-        avgConsumption: totals?.avgConsumption || 0,
+        avgConsumption: totals?.avgConsumptionKmL || 0,
         highConsumption: highConsumption.results,
         monthly: monthly.results,
         compare: compare.results,
