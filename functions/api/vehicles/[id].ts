@@ -30,7 +30,7 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
   const deadlines = await env.DB
     .prepare("SELECT deadline_type as deadlineType, due_date as dueDate FROM vehicle_deadlines WHERE vehicle_id = ? ORDER BY deadline_type")
     .bind(id)
-    .all<{ deadlineType: "bollo" | "revisione" | "rca"; dueDate: string }>();
+    .all<{ deadlineType: "bollo" | "revisione" | "rca" | "tachigrafo" | "periodica_gru" | "strutturale"; dueDate: string }>();
 
   const history = await env.DB
     .prepare(`
@@ -63,14 +63,50 @@ export const onRequestPatch: PagesFunction<{ DB: D1Database }> = async ({ reques
   const id = Number(params.id);
   if (!id) return Response.json({ ok: false, error: "ID Non Valido" }, { status: 400 });
 
-  const body = (await request.json().catch(() => null)) as { model?: string; description?: string } | null;
+  const body = (await request.json().catch(() => null)) as { code?: string; plate?: string; model?: string; description?: string } | null;
+  const code = String(body?.code || "").trim().toUpperCase();
+  const plate = String(body?.plate || "").trim().toUpperCase();
   const model = String(body?.model || "").trim();
   const description = String(body?.description || "").trim();
 
-  if (!model) {
-    return Response.json({ ok: false, error: "Modello Obbligatorio" }, { status: 400 });
+  if (!code || !plate || !model) {
+    return Response.json({ ok: false, error: "Campi obbligatori: Codice, Targa, Modello" }, { status: 400 });
   }
 
-  await env.DB.prepare("UPDATE vehicles SET model = ?, description = ? WHERE id = ?").bind(model, description || null, id).run();
+  const existing = await env.DB.prepare("SELECT id FROM vehicles WHERE id = ?").bind(id).first<{ id: number }>();
+  if (!existing) {
+    return Response.json({ ok: false, error: "Mezzo Non Trovato" }, { status: 404 });
+  }
+
+  await env.DB.prepare("UPDATE vehicles SET code = ?, plate = ?, model = ?, description = ? WHERE id = ?")
+    .bind(code, plate, model, description || null, id)
+    .run();
+  return Response.json({ ok: true });
+};
+
+export const onRequestDelete: PagesFunction<{ DB: D1Database; PHOTOS?: R2Bucket }> = async ({ request, env, params }) => {
+  await ensureSeedData(env.DB);
+  await ensureCoreTables(env.DB);
+  const auth = await requireAuth(request, env.DB);
+  if (auth instanceof Response) return auth;
+  const denied = requireRole(auth, ["admin"]);
+  if (denied) return denied;
+
+  const id = Number(params.id);
+  if (!id) return Response.json({ ok: false, error: "ID Non Valido" }, { status: 400 });
+
+  const vehicle = await env.DB.prepare("SELECT id, photo_key as photoKey FROM vehicles WHERE id = ?").bind(id).first<{ id: number; photoKey: string | null }>();
+  if (!vehicle) {
+    return Response.json({ ok: false, error: "Mezzo Non Trovato" }, { status: 404 });
+  }
+
+  await env.DB.prepare("DELETE FROM vehicle_deadlines WHERE vehicle_id = ?").bind(id).run();
+  await env.DB.prepare("DELETE FROM fuel_events WHERE vehicle_id = ?").bind(id).run();
+  await env.DB.prepare("DELETE FROM vehicles WHERE id = ?").bind(id).run();
+
+  if (vehicle.photoKey && env.PHOTOS) {
+    await env.PHOTOS.delete(vehicle.photoKey).catch(() => undefined);
+  }
+
   return Response.json({ ok: true });
 };
