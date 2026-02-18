@@ -6,6 +6,14 @@ function extFromFilename(name: string) {
   return raw.replace(/[^a-z0-9]/g, "") || "bin";
 }
 
+function normalizeRefuelDate(input: string) {
+  const raw = input.trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `${raw}T00:00`;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw)) return raw.slice(0, 16);
+  return "";
+}
+
 export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request, env }) => {
   await ensureSeedData(env.DB);
   await ensureCoreTables(env.DB);
@@ -49,12 +57,12 @@ export const onRequestPost: PagesFunction<{ DB: D1Database; PHOTOS: R2Bucket }> 
 
   const form = await request.formData();
   const vehicleId = Number(form.get("vehicleId") || 0);
-  const refuelAt = String(form.get("refuelAt") || "");
+  const refuelAt = normalizeRefuelDate(String(form.get("refuelAt") || ""));
   const odometerKm = Number(form.get("odometerKm") || 0);
   const liters = Number(form.get("liters") || 0);
   const amount = Number(form.get("amount") || 0);
   const sourceType = form.get("sourceType") === "tank" ? "tank" : "card";
-  const sourceIdentifier = String(form.get("sourceIdentifier") || "").trim().toUpperCase();
+  const sourceIdentifier = String(form.get("sourceIdentifier") || "").trim().toUpperCase() || "N/D";
   const receipt = form.get("receipt");
 
   if (!vehicleId || !refuelAt || !sourceIdentifier || liters <= 0 || amount < 0) {
