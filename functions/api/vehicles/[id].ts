@@ -45,20 +45,38 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
     .prepare(`
       SELECT fe.id, fe.refuel_at as refuelAt, fe.odometer_km as odometerKm, fe.liters, fe.amount,
         fe.source_type as sourceType, fe.source_identifier as sourceIdentifier,
+        CASE WHEN (fe.odometer_km - prev.odometer_km) > 0 THEN (fe.odometer_km - prev.odometer_km) ELSE NULL END as distanceKm,
         CASE WHEN (fe.odometer_km - prev.odometer_km) > 0 AND fe.liters > 0 THEN (fe.odometer_km - prev.odometer_km) / fe.liters ELSE NULL END as consumptionKmL,
         CASE WHEN (fe.odometer_km - prev.odometer_km) > 0 AND fe.liters > 0 THEN (fe.liters * 100.0) / (fe.odometer_km - prev.odometer_km) ELSE NULL END as consumptionL100km
       FROM fuel_events fe
       LEFT JOIN fuel_events prev ON prev.id = (
         SELECT p.id FROM fuel_events p
-        WHERE p.vehicle_id = fe.vehicle_id AND p.refuel_at < fe.refuel_at
-        ORDER BY p.refuel_at DESC
+        WHERE p.vehicle_id = fe.vehicle_id
+          AND (
+            p.refuel_at < fe.refuel_at
+            OR (p.refuel_at = fe.refuel_at AND p.odometer_km < fe.odometer_km)
+            OR (p.refuel_at = fe.refuel_at AND p.odometer_km = fe.odometer_km AND p.id < fe.id)
+          )
+        ORDER BY p.refuel_at DESC, p.odometer_km DESC, p.id DESC
         LIMIT 1
       )
       WHERE fe.vehicle_id = ?
-      ORDER BY fe.refuel_at DESC
+      ORDER BY fe.refuel_at DESC, fe.odometer_km DESC, fe.id DESC
     `)
     .bind(id)
     .all();
+
+
+  const lastRefueling = await env.DB
+    .prepare(`
+      SELECT odometer_km as lastOdometerKm
+      FROM fuel_events
+      WHERE vehicle_id = ?
+      ORDER BY refuel_at DESC, odometer_km DESC, id DESC
+      LIMIT 1
+    `)
+    .bind(id)
+    .first<{ lastOdometerKm: number }>();
 
   const documents = await env.DB
     .prepare(`
@@ -75,7 +93,7 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
     .bind(id)
     .all<VehicleDocument>();
 
-  return Response.json({ ok: true, data: { vehicle, deadlines: deadlines.results, history: history.results, documents: documents.results } });
+  return Response.json({ ok: true, data: { vehicle: { ...vehicle, lastOdometerKm: lastRefueling?.lastOdometerKm ?? null }, deadlines: deadlines.results, history: history.results, documents: documents.results } });
 };
 
 export const onRequestPatch: PagesFunction<{ DB: D1Database }> = async ({ request, env, params }) => {

@@ -51,10 +51,14 @@ export const onRequestPatch: PagesFunction<{ DB: D1Database }> = async ({ reques
   const prev = await env.DB.prepare(`
     SELECT odometer_km as km
     FROM fuel_events
-    WHERE vehicle_id = ? AND id <> ? AND refuel_at < ?
-    ORDER BY refuel_at DESC
+    WHERE vehicle_id = ? AND id <> ?
+      AND (
+        refuel_at < ?
+        OR (refuel_at = ? AND odometer_km <= ?)
+      )
+    ORDER BY refuel_at DESC, odometer_km DESC, id DESC
     LIMIT 1
-  `).bind(current.vehicleId, id, refuelAt).first<{ km: number }>();
+  `).bind(current.vehicleId, id, refuelAt, refuelAt, odometerKm).first<{ km: number }>();
 
   if (prev && odometerKm < prev.km) {
     return Response.json({ ok: false, error: "Il chilometraggio non può essere inferiore al precedente" }, { status: 400 });
@@ -63,10 +67,14 @@ export const onRequestPatch: PagesFunction<{ DB: D1Database }> = async ({ reques
   const next = await env.DB.prepare(`
     SELECT odometer_km as km
     FROM fuel_events
-    WHERE vehicle_id = ? AND id <> ? AND refuel_at > ?
-    ORDER BY refuel_at ASC
+    WHERE vehicle_id = ? AND id <> ?
+      AND (
+        refuel_at > ?
+        OR (refuel_at = ? AND odometer_km >= ?)
+      )
+    ORDER BY refuel_at ASC, odometer_km ASC, id ASC
     LIMIT 1
-  `).bind(current.vehicleId, id, refuelAt).first<{ km: number }>();
+  `).bind(current.vehicleId, id, refuelAt, refuelAt, odometerKm).first<{ km: number }>();
 
   if (next && odometerKm > next.km) {
     return Response.json({ ok: false, error: "Il chilometraggio non può superare il successivo" }, { status: 400 });

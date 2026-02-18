@@ -31,6 +31,7 @@ type Refueling = {
   sourceAssignedTo?: string | null;
   receiptKey?: string;
   consumptionKmL?: number | null;
+  distanceKm?: number | null;
   consumptionL100km?: number;
 };
 type FuelSource = { id: number; sourceType: "card" | "tank"; identifier: string; assignedTo?: string | null; active: number };
@@ -58,9 +59,9 @@ const DOCUMENT_TYPE_LABELS: Record<VehicleDocumentType, string> = {
 };
 
 type VehicleDetail = {
-  vehicle: Vehicle;
+  vehicle: Vehicle & { lastOdometerKm?: number | null };
   deadlines: Array<{ deadlineType: DeadlineType; dueDate: string }>;
-  history: Array<{ id: number; refuelAt: string; odometerKm: number; liters: number; amount: number; sourceType: string; sourceIdentifier?: string; consumptionKmL?: number | null; consumptionL100km?: number }>;
+  history: Array<{ id: number; refuelAt: string; odometerKm: number; liters: number; amount: number; sourceType: string; sourceIdentifier?: string; distanceKm?: number | null; consumptionKmL?: number | null; consumptionL100km?: number }>;
   documents: Array<{ id: number; docType: VehicleDocumentType; fileName: string; fileKey: string; mimeType?: string | null; createdAt: string }>;
 };
 
@@ -68,8 +69,9 @@ type Dashboard = {
   totalLiters: number;
   totalAmount: number;
   avgConsumption: number;
+  totalDistanceKm?: number;
   highConsumption: Array<{ code: string; plate: string; model: string; avgConsumption: number }>;
-  monthly: Array<{ month: string; liters: number; amount: number }>;
+  monthly: Array<{ month: string; liters: number; amount: number; distanceKm?: number }>;
   compare: Array<{ code: string; plate: string; avgConsumption: number }>;
 };
 
@@ -239,7 +241,7 @@ export default function App() {
       setUser(me.user);
       const [v, d, ds, s] = await Promise.all([
         api<{ data: Vehicle[] }>(`/api/vehicles?search=${encodeURIComponent(search)}&active=all`, currentToken),
-        api<{ data: Dashboard }>("/api/dashboard", currentToken),
+        api<{ data: Dashboard }>(`/api/dashboard?from=${fromDate}T00:00&to=${toDate}T23:59`, currentToken),
         api<{ data: DeadlineSummary }>("/api/deadlines/summary", currentToken),
         api<{ data: FuelSource[] }>("/api/fuel-sources", currentToken),
       ]);
@@ -262,7 +264,7 @@ export default function App() {
       }
       setError(message);
     }
-  }, [token, search, loadRefuelings]);
+  }, [token, search, fromDate, toDate, loadRefuelings]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
@@ -414,6 +416,15 @@ export default function App() {
       const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: "" });
       if (!rows.length) throw new Error("Nessuna riga nel file");
 
+      const sortedRows = [...rows].sort((a, b) => {
+        const da = parseExcelDate(findExcelValue(a, ["data"]));
+        const db = parseExcelDate(findExcelValue(b, ["data"]));
+        const ka = parseNumberish(findExcelValue(a, ["chilometraggio", "chilometrag", "km"]));
+        const kb = parseNumberish(findExcelValue(b, ["chilometraggio", "chilometrag", "km"]));
+        if (da !== db) return da.localeCompare(db);
+        return ka - kb;
+      });
+
       const sourceByLast4 = new Map<string, FuelSource>();
       for (const src of fuelSources.filter((x) => x.active)) {
         const last4 = last4Digits(src.identifier);
@@ -425,7 +436,7 @@ export default function App() {
 
       let imported = 0;
       let skipped = 0;
-      for (const row of rows) {
+      for (const row of sortedRows) {
         const cardRaw = String(findExcelValue(row, ["n° carta", "n carta", "numero carta", "carta", "n. carta"]) || "").trim();
         const date = parseExcelDate(findExcelValue(row, ["data"]));
         const amount = parseNumberish(findExcelValue(row, ["importo"]));
@@ -601,8 +612,8 @@ export default function App() {
 
   function exportVehicleHistoryPdf() {
     if (!vehicleDetail) return;
-    const rows = vehicleDetail.history.map((h) => `<tr><td>${new Date(h.refuelAt).toLocaleDateString()}</td><td>${h.odometerKm}</td><td>${h.liters.toFixed(2)}</td><td>${h.amount.toFixed(2)}</td><td>${h.sourceType === "tank" ? "Cisterna" : "Carta"}</td><td>${h.sourceIdentifier || "-"}</td><td>${h.consumptionKmL ? h.consumptionKmL.toFixed(2) : "-"}</td><td>${h.consumptionL100km ? h.consumptionL100km.toFixed(2) : "-"}</td></tr>`).join("");
-    void downloadPdfDocument(`Storico Rifornimenti ${vehicleDetail.vehicle.code}`, `<table border='1' cellpadding='6' cellspacing='0'><tr><th>Data</th><th>Km</th><th>Litri</th><th>Importo</th><th>Fonte</th><th>ID Fonte</th><th>Km/L</th><th>L/100Km</th></tr>${rows}</table>`);
+    const rows = vehicleDetail.history.map((h) => `<tr><td>${new Date(h.refuelAt).toLocaleDateString()}</td><td>${h.odometerKm}</td><td>${h.liters.toFixed(2)}</td><td>${h.amount.toFixed(2)}</td><td>${h.sourceType === "tank" ? "Cisterna" : "Carta"}</td><td>${h.sourceIdentifier || "-"}</td><td>${h.distanceKm ? h.distanceKm.toFixed(0) : "-"}</td><td>${h.consumptionKmL ? h.consumptionKmL.toFixed(2) : "-"}</td><td>${h.consumptionL100km ? h.consumptionL100km.toFixed(2) : "-"}</td></tr>`).join("");
+    void downloadPdfDocument(`Storico Rifornimenti ${vehicleDetail.vehicle.code}`, `<table border='1' cellpadding='6' cellspacing='0'><tr><th>Data</th><th>Km</th><th>Litri</th><th>Importo</th><th>Fonte</th><th>ID Fonte</th><th>Km Percorsi</th><th>Km/L</th><th>L/100Km</th></tr>${rows}</table>`);
   }
 
   function exportVehicleSheetPdf() {
@@ -624,8 +635,8 @@ export default function App() {
   }
 
   function exportRefuelingsPdf() {
-    const rows = sortedRefuelings.map((r) => `<tr><td>${new Date(r.refuelAt).toLocaleDateString()}</td><td>${r.vehicleCode} (${r.plate})</td><td>${r.odometerKm}</td><td>${r.liters.toFixed(2)}</td><td>${r.amount.toFixed(2)}</td><td>${r.sourceType === "tank" ? "Cisterna" : "Carta"}</td><td>${r.sourceIdentifier}</td><td>${r.sourceAssignedTo || "-"}</td><td>${r.consumptionKmL ? r.consumptionKmL.toFixed(2) : "-"}</td><td>${r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td></tr>`).join("");
-    void downloadPdfDocument("Export Rifornimenti", `<table border='1' cellpadding='6' cellspacing='0'><tr><th>Data</th><th>Mezzo</th><th>Km</th><th>Litri</th><th>Importo</th><th>Fonte</th><th>ID Fonte</th><th>Utilizzatore</th><th>Km/L</th><th>L/100Km</th></tr>${rows}</table>`);
+    const rows = sortedRefuelings.map((r) => `<tr><td>${new Date(r.refuelAt).toLocaleDateString()}</td><td>${r.vehicleCode} (${r.plate})</td><td>${r.odometerKm}</td><td>${r.liters.toFixed(2)}</td><td>${r.amount.toFixed(2)}</td><td>${r.sourceType === "tank" ? "Cisterna" : "Carta"}</td><td>${r.sourceIdentifier}</td><td>${r.sourceAssignedTo || "-"}</td><td>${r.distanceKm ? r.distanceKm.toFixed(0) : "-"}</td><td>${r.consumptionKmL ? r.consumptionKmL.toFixed(2) : "-"}</td><td>${r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td></tr>`).join("");
+    void downloadPdfDocument("Export Rifornimenti", `<table border='1' cellpadding='6' cellspacing='0'><tr><th>Data</th><th>Mezzo</th><th>Km</th><th>Litri</th><th>Importo</th><th>Fonte</th><th>ID Fonte</th><th>Utilizzatore</th><th>Km Percorsi</th><th>Km/L</th><th>L/100Km</th></tr>${rows}</table>`);
   }
 
   if (!token || !user) {
@@ -657,7 +668,8 @@ export default function App() {
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Litri Totali: <b>{dashboard.totalLiters.toFixed(2)}</b></div>
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Spesa Totale: <b>EUR {dashboard.totalAmount.toFixed(2)}</b></div>
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Consumo Medio: <b>{dashboard.avgConsumption.toFixed(2)} Km/L</b></div>
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 md:col-span-3">
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">Km Percorsi: <b>{(dashboard.totalDistanceKm || 0).toFixed(0)}</b></div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 md:col-span-4">
             <h3 className="mb-2 font-semibold">Riepilogo Scadenze</h3>
             <div className="flex flex-wrap gap-4 text-sm">
               <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-green-500" />Valide: {deadlineSummary.valid}</span>
@@ -666,7 +678,9 @@ export default function App() {
             </div>
           </div>
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="mb-2 font-semibold">Litri Mensili</h3><MiniBars data={dashboard.monthly.map((m) => ({ label: m.month, value: m.liters }))} /></div>
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 md:col-span-2"><h3 className="mb-2 font-semibold">Confronto Consumi Mezzi</h3><MiniBars data={dashboard.compare.map((c) => ({ label: `${c.code}/${c.plate}`, value: c.avgConsumption }))} /></div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="mb-2 font-semibold">Costi Mensili</h3><MiniBars data={dashboard.monthly.map((m) => ({ label: m.month, value: m.amount }))} /></div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="mb-2 font-semibold">Km Mensili</h3><MiniBars data={dashboard.monthly.map((m) => ({ label: m.month, value: m.distanceKm || 0 }))} /></div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 md:col-span-3"><h3 className="mb-2 font-semibold">Confronto Consumi Mezzi (Km/L)</h3><MiniBars data={dashboard.compare.map((c) => ({ label: `${c.code}/${c.plate}`, value: c.avgConsumption }))} /></div>
         </section>
       )}
 
@@ -707,7 +721,7 @@ export default function App() {
           {user.role === "admin" && <form onSubmit={addRefueling} className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-2"><select name="vehicleId" required className="rounded bg-slate-950 p-2"><option value="">Seleziona Mezzo</option>{vehicles.filter((v) => v.active).map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><input name="refuelAt" type="date" required className="rounded bg-slate-950 p-2" /><input name="odometerKm" type="number" min="0" required className="rounded bg-slate-950 p-2" placeholder="Chilometraggio" /><input name="liters" type="number" min="0.01" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Litri" /><input name="amount" type="number" min="0" step="0.01" required className="rounded bg-slate-950 p-2" placeholder="Importo in €" /><select name="sourceType" value={refuelSourceType} onChange={(e) => setRefuelSourceType(e.target.value as "card" | "tank")} className="rounded bg-slate-950 p-2"><option value="card">Carta Carburante</option><option value="tank">Cisterna</option></select><select name="sourceIdentifier" required className="rounded bg-slate-950 p-2"><option value="">Seleziona Carta/Cisterna</option>{fuelSources.filter((x) => x.active && x.sourceType === refuelSourceType).map((x) => <option key={x.id} value={x.identifier}>{x.identifier}{x.assignedTo ? ` - ${x.assignedTo}` : ""}</option>)}</select><input name="receipt" type="file" accept="image/*,.pdf" className="rounded bg-slate-950 p-2" /><span className="self-center text-xs text-slate-400">Scontrino facoltativo</span><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black md:col-span-2">Registra Rifornimento</button></form>}
           {user.role === "admin" && <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Importa Rifornimenti Da Excel</h3><p className="text-xs text-slate-400">Colonne: N° CARTA, DATA, IMPORTO, CHILOMETRAGGIO, PREZZO UNITARIO, QUANTITÀ. Associazione carta per ultime 4 cifre.</p><select className="w-full rounded bg-slate-950 p-2" value={refuelImportVehicleId} onChange={(e) => setRefuelImportVehicleId(Number(e.target.value))}><option value={0}>Seleziona Mezzo Per Import</option>{vehicles.filter((v) => v.active).map((v) => <option key={v.id} value={v.id}>{v.code} - {v.plate}</option>)}</select><input type="file" accept=".xlsx,.xls,.csv" className="w-full rounded bg-slate-950 p-2" onChange={(e) => setRefuelImportFile(e.target.files?.[0] || null)} /><button type="button" disabled={!refuelImportFile || !refuelImportVehicleId || refuelImporting} className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50" onClick={async () => { if (!refuelImportFile || !refuelImportVehicleId) return; try { await importRefuelingsFromExcel(refuelImportFile); setRefuelImportFile(null); } catch (err: unknown) { setError(err instanceof Error ? err.message : "Errore import rifornimenti"); } }}>IMPORTA RIFORNIMENTI</button></div>}
 
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "cons_desc")} className="rounded bg-slate-950 p-2"><option value="date_desc">Data Desc</option><option value="date_asc">Data Asc</option><option value="cons_desc">Km/L Alto</option></select><div className="mt-2 overflow-auto"><table className="min-w-full text-sm"><thead><tr><th className="text-left">Data</th><th className="text-left">Mezzo</th><th className="text-left">Fonte</th><th className="text-left">Utilizzatore</th><th className="text-left">Km</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th>{user.role === "admin" && <th className="text-left">Azioni</th>}</tr></thead><tbody>{sortedRefuelings.map((r) => <tr key={r.id} className="border-t border-slate-800"><td>{new Date(r.refuelAt).toLocaleDateString()}</td><td>{r.vehicleCode}</td><td>{r.sourceType === "tank" ? "Cisterna" : "Carta"} / {r.sourceIdentifier}</td><td>{r.sourceAssignedTo || "-"}</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>EUR {r.amount.toFixed(2)}</td><td>{r.consumptionKmL ? r.consumptionKmL.toFixed(2) : "-"}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td>{user.role === "admin" && <td><div className="flex gap-1"><button type="button" onClick={() => { void editRefueling(r); }} className="rounded bg-slate-700 px-2 py-1 text-xs">Modifica</button><button type="button" onClick={() => { void deleteRefueling(r.id); }} className="rounded bg-red-700 px-2 py-1 text-xs">Elimina</button></div></td>}</tr>)}</tbody></table></div></div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "cons_desc")} className="rounded bg-slate-950 p-2"><option value="date_desc">Data Desc</option><option value="date_asc">Data Asc</option><option value="cons_desc">Km/L Alto</option></select><div className="mt-2 overflow-auto"><table className="min-w-full text-sm"><thead><tr><th className="text-left">Data</th><th className="text-left">Mezzo</th><th className="text-left">Fonte</th><th className="text-left">Utilizzatore</th><th className="text-left">Km</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km Percorsi</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th>{user.role === "admin" && <th className="text-left">Azioni</th>}</tr></thead><tbody>{sortedRefuelings.map((r) => <tr key={r.id} className="border-t border-slate-800"><td>{new Date(r.refuelAt).toLocaleDateString()}</td><td>{r.vehicleCode}</td><td>{r.sourceType === "tank" ? "Cisterna" : "Carta"} / {r.sourceIdentifier}</td><td>{r.sourceAssignedTo || "-"}</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>EUR {r.amount.toFixed(2)}</td><td>{r.distanceKm ? r.distanceKm.toFixed(0) : "-"}</td><td>{r.consumptionKmL ? r.consumptionKmL.toFixed(2) : "-"}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td>{user.role === "admin" && <td><div className="flex gap-1"><button type="button" onClick={() => { void editRefueling(r); }} className="rounded bg-slate-700 px-2 py-1 text-xs">Modifica</button><button type="button" onClick={() => { void deleteRefueling(r.id); }} className="rounded bg-red-700 px-2 py-1 text-xs">Elimina</button></div></td>}</tr>)}</tbody></table></div></div>
         </section>
       )}
 
@@ -776,7 +790,7 @@ export default function App() {
       {modalOpen && vehicleDetail && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4">
           <div className="max-h-[92vh] w-full max-w-4xl overflow-auto rounded-2xl border border-slate-700 bg-slate-900 p-5">
-            <div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-bold">Dettaglio Mezzo {vehicleDetail.vehicle.code} ({vehicleDetail.vehicle.plate})</h2><button className="rounded bg-slate-700 px-3 py-1" onClick={() => setModalOpen(false)}>Chiudi</button></div>
+            <div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-bold">Dettaglio Mezzo {vehicleDetail.vehicle.code} ({vehicleDetail.vehicle.plate}) - Ultimo Km: {vehicleDetail.vehicle.lastOdometerKm ?? "-"}</h2><button className="rounded bg-slate-700 px-3 py-1" onClick={() => setModalOpen(false)}>Chiudi</button></div>
             <form onSubmit={saveVehicleDetails} className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm">Codice</label>
@@ -859,7 +873,7 @@ export default function App() {
                 <div className="mt-3 rounded border border-slate-700 p-3">
                   <div className="mb-2 flex items-center justify-between"><h3 className="font-semibold">Storico Rifornimenti</h3><div className="flex gap-2"><button type="button" onClick={exportVehicleHistoryPdf} className="rounded bg-orange-500 px-2 py-1 text-sm font-semibold text-black">PDF Consumi</button><button type="button" onClick={exportVehicleSheetPdf} className="rounded bg-slate-700 px-2 py-1 text-sm font-semibold">PDF Scheda Mezzo</button></div></div>
                   <div className="max-h-52 overflow-auto text-sm">
-                    <table className="min-w-full"><thead><tr><th className="text-left">Data</th><th className="text-left">Fonte</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th></tr></thead><tbody>{vehicleDetail.history.map((h) => <tr key={h.id} className="border-t border-slate-800"><td>{new Date(h.refuelAt).toLocaleDateString()}</td><td>{h.sourceType === "tank" ? "Cisterna" : "Carta"} / {h.sourceIdentifier || "-"}</td><td>{h.liters.toFixed(2)}</td><td>EUR {h.amount.toFixed(2)}</td><td>{h.consumptionKmL ? h.consumptionKmL.toFixed(2) : "-"}</td><td>{h.consumptionL100km ? h.consumptionL100km.toFixed(2) : "-"}</td></tr>)}</tbody></table>
+                    <table className="min-w-full"><thead><tr><th className="text-left">Data</th><th className="text-left">Fonte</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km Percorsi</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th></tr></thead><tbody>{vehicleDetail.history.map((h) => <tr key={h.id} className="border-t border-slate-800"><td>{new Date(h.refuelAt).toLocaleDateString()}</td><td>{h.sourceType === "tank" ? "Cisterna" : "Carta"} / {h.sourceIdentifier || "-"}</td><td>{h.liters.toFixed(2)}</td><td>EUR {h.amount.toFixed(2)}</td><td>{h.distanceKm ? h.distanceKm.toFixed(0) : "-"}</td><td>{h.consumptionKmL ? h.consumptionKmL.toFixed(2) : "-"}</td><td>{h.consumptionL100km ? h.consumptionL100km.toFixed(2) : "-"}</td></tr>)}</tbody></table>
                   </div>
                 </div>
               </div>
