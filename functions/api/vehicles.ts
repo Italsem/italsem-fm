@@ -19,6 +19,7 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
           plate,
           COALESCE(NULLIF(model,''), 'Senza modello') as model,
           description,
+          photo_key as photo_key,
           (
             SELECT COUNT(*)
             FROM vehicle_deadlines vd
