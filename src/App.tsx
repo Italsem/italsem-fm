@@ -283,13 +283,57 @@ export default function App() {
     await loadAll();
   }
 
-  function downloadPdfDocument(title: string, rows: string) {
+  async function downloadPdfDocument(title: string, rows: string) {
     const w = window.open("", "_blank");
     if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${title}</title></head><body style="font-family:Arial,sans-serif;padding:18px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><img src="/logo.png" alt="Italsem FM" style="height:42px" /><h1 style="margin:0;font-size:22px;">${title}</h1></div>${rows}</body></html>`);
+
+    let logoSrc = "/logo.png";
+    try {
+      const logoRes = await fetch("/logo.png");
+      const logoBlob = await logoRes.blob();
+      logoSrc = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(String(reader.result || "/logo.png"));
+        reader.readAsDataURL(logoBlob);
+      });
+    } catch {
+      logoSrc = "/logo.png";
+    }
+
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${title}</title></head><body style="font-family:Arial,sans-serif;padding:18px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><img id="pdf-logo" src="${logoSrc}" alt="Italsem FM" style="height:42px" /><h1 style="margin:0;font-size:22px;">${title}</h1></div>${rows}</body></html>`);
     w.document.close();
-    w.focus();
-    w.print();
+
+    const triggerPrint = () => {
+      w.focus();
+      w.print();
+    };
+
+    const logo = w.document.getElementById("pdf-logo") as HTMLImageElement | null;
+    if (!logo) {
+      triggerPrint();
+      return;
+    }
+
+    if (logo.complete) {
+      triggerPrint();
+      return;
+    }
+
+    logo.onload = () => triggerPrint();
+    logo.onerror = () => triggerPrint();
+  }
+
+  function exportVehicleHistoryPdf() {
+    if (!vehicleDetail) return;
+    const rows = vehicleDetail.history.map((h) => `<tr><td>${new Date(h.refuelAt).toLocaleDateString()}</td><td>${h.odometerKm}</td><td>${h.liters.toFixed(2)}</td><td>${h.amount.toFixed(2)}</td><td>${(h.consumptionL100km || 0).toFixed(2)}</td></tr>`).join("");
+    void downloadPdfDocument(`Storico Rifornimenti ${vehicleDetail.vehicle.code}`, `<table border='1' cellpadding='6' cellspacing='0'><tr><th>Data</th><th>Km</th><th>Litri</th><th>Importo</th><th>Consumo</th></tr>${rows}</table>`);
+  }
+
+  function exportVehicleSheetPdf() {
+    if (!vehicleDetail) return;
+    const deadlineRows = Object.entries(deadlineForm).filter(([,v]) => v).map(([k,v]) => `<tr><td>${DEADLINE_LABELS[k as DeadlineType]}</td><td>${new Date(v).toLocaleDateString()}</td></tr>`).join("");
+    const info = `<p><b>Codice:</b> ${vehicleDetail.vehicle.code}</p><p><b>Targa:</b> ${vehicleDetail.vehicle.plate}</p><p><b>Modello:</b> ${vehicleDetail.vehicle.model}</p><p><b>Descrizione:</b> ${vehicleDetail.vehicle.description || "-"}</p>${vehicleDetail.vehicle.photo_key ? `<img src='/api/photo?key=${encodeURIComponent(vehicleDetail.vehicle.photo_key)}' style='max-width:360px;max-height:240px;object-fit:cover;border:1px solid #ddd;'/>` : ""}`;
+    void downloadPdfDocument(`Scheda Veicolo ${vehicleDetail.vehicle.code}`, `${info}<h3>Scadenze</h3><table border='1' cellpadding='6' cellspacing='0'><tr><th>Tipo</th><th>Scadenza</th></tr>${deadlineRows}</table>`);
   }
 
   function exportVehicleHistoryPdf() {
