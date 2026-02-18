@@ -184,7 +184,7 @@ export default function App() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [vehicleDetail, setVehicleDetail] = useState<VehicleDetail | null>(null);
-  const [editVehicleForm, setEditVehicleForm] = useState({ model: "", description: "" });
+  const [editVehicleForm, setEditVehicleForm] = useState({ code: "", plate: "", model: "", description: "" });
   const [deadlineForm, setDeadlineForm] = useState<Record<DeadlineType, string>>({ bollo: "", revisione: "", rca: "", tachigrafo: "", periodica_gru: "", strutturale: "" });
   const [enabledOptionalDeadlines, setEnabledOptionalDeadlines] = useState<DeadlineType[]>([]);
   const [excelImportFile, setExcelImportFile] = useState<File | null>(null);
@@ -248,7 +248,7 @@ export default function App() {
   async function openVehicleModal(id: number) {
     const d = await api<{ data: VehicleDetail }>(`/api/vehicles/${id}`, token);
     setVehicleDetail(d.data);
-    setEditVehicleForm({ model: d.data.vehicle.model, description: d.data.vehicle.description || "" });
+    setEditVehicleForm({ code: d.data.vehicle.code, plate: d.data.vehicle.plate, model: d.data.vehicle.model, description: d.data.vehicle.description || "" });
     const map = { bollo: "", revisione: "", rca: "", tachigrafo: "", periodica_gru: "", strutturale: "" } as Record<DeadlineType, string>;
     d.data.deadlines.forEach((x) => { map[x.deadlineType] = x.dueDate; });
     setDeadlineForm(map);
@@ -366,6 +366,16 @@ export default function App() {
     await api(`/api/vehicles/${vehicleDetail.vehicle.id}/deadlines`, token, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(deadlineForm) });
     await openVehicleModal(vehicleDetail.vehicle.id);
     await loadAll();
+  }
+
+  async function deleteVehicle() {
+    if (!vehicleDetail || user?.role !== "admin") return;
+    if (!window.confirm(`Confermi l'eliminazione del mezzo ${vehicleDetail.vehicle.code} (${vehicleDetail.vehicle.plate})?`)) return;
+    await api(`/api/vehicles/${vehicleDetail.vehicle.id}`, token, { method: "DELETE" });
+    setModalOpen(false);
+    setVehicleDetail(null);
+    await loadAll();
+    setError("Mezzo eliminato correttamente");
   }
 
   async function uploadVehiclePhoto(file: File) {
@@ -519,6 +529,10 @@ export default function App() {
             <div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-bold">Dettaglio Mezzo {vehicleDetail.vehicle.code} ({vehicleDetail.vehicle.plate})</h2><button className="rounded bg-slate-700 px-3 py-1" onClick={() => setModalOpen(false)}>Chiudi</button></div>
             <form onSubmit={saveVehicleDetails} className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
+                <label className="text-sm">Codice</label>
+                <input className="w-full rounded bg-slate-950 p-2" value={editVehicleForm.code} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, code: e.target.value.toUpperCase() })} />
+                <label className="text-sm">Targa</label>
+                <input className="w-full rounded bg-slate-950 p-2" value={editVehicleForm.plate} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, plate: e.target.value.toUpperCase() })} />
                 <label className="text-sm">Modello</label>
                 <input className="w-full rounded bg-slate-950 p-2" value={editVehicleForm.model} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, model: e.target.value })} />
                 <label className="text-sm">Descrizione</label>
@@ -555,7 +569,12 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-                {user.role === "admin" && <button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Salva Dati Mezzo</button>}
+                {user.role === "admin" && (
+                  <div className="flex flex-wrap gap-2">
+                    <button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Salva Dati Mezzo</button>
+                    <button type="button" onClick={deleteVehicle} className="rounded-lg bg-red-600 px-3 py-2 font-semibold text-white">Elimina Mezzo</button>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">

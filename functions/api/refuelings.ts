@@ -14,9 +14,9 @@ function normalizeRefuelDate(input: string) {
   return "";
 }
 
-async function hasFuelEventsColumn(db: D1Database, column: string) {
+async function fuelEventsColumns(db: D1Database) {
   const info = await db.prepare("PRAGMA table_info(fuel_events)").all<{ name: string }>();
-  return (info.results || []).some((c) => c.name === column);
+  return new Set((info.results || []).map((c) => c.name));
 }
 
 function isUploadFile(value: FormDataEntryValue | null): value is File {
@@ -104,18 +104,41 @@ export const onRequestPost: PagesFunction<{ DB: D1Database; PHOTOS: R2Bucket }> 
     });
   }
 
-  const hasLegacyDate = await hasFuelEventsColumn(env.DB, "date");
-  if (hasLegacyDate) {
-    await env.DB.prepare(`
-      INSERT INTO fuel_events(vehicle_id, refuel_at, date, odometer_km, liters, amount, source_type, source_identifier, receipt_key, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(vehicleId, refuelAt, refuelAt.slice(0, 10), odometerKm, liters, amount, sourceType, sourceIdentifier, receiptKey, auth.userId).run();
-  } else {
-    await env.DB.prepare(`
-      INSERT INTO fuel_events(vehicle_id, refuel_at, odometer_km, liters, amount, source_type, source_identifier, receipt_key, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(vehicleId, refuelAt, odometerKm, liters, amount, sourceType, sourceIdentifier, receiptKey, auth.userId).run();
-  }
+  const cols = await fuelEventsColumns(env.DB);
+  const insertCols = [
+    "vehicle_id",
+    "refuel_at",
+    ...(cols.has("date") ? ["date"] : []),
+    "odometer_km",
+    "liters",
+    "amount",
+    ...(cols.has("source") ? ["source"] : []),
+    ...(cols.has("station") ? ["station"] : []),
+    ...(cols.has("site") ? ["site"] : []),
+    "source_type",
+    "source_identifier",
+    "receipt_key",
+    "created_by",
+  ];
+
+  const values = [
+    vehicleId,
+    refuelAt,
+    ...(cols.has("date") ? [refuelAt.slice(0, 10)] : []),
+    odometerKm,
+    liters,
+    amount,
+    ...(cols.has("source") ? [sourceType] : []),
+    ...(cols.has("station") ? [sourceIdentifier] : []),
+    ...(cols.has("site") ? [sourceIdentifier] : []),
+    sourceType,
+    sourceIdentifier,
+    receiptKey,
+    auth.userId,
+  ];
+
+  const placeholders = insertCols.map(() => "?").join(", ");
+  await env.DB.prepare(`INSERT INTO fuel_events(${insertCols.join(", ")}) VALUES (${placeholders})`).bind(...values).run();
 
     return Response.json({ ok: true });
   } catch (e: unknown) {
