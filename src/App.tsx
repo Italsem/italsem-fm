@@ -333,6 +333,7 @@ export default function App() {
     await api("/api/fuel-sources", token, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sourceForm) });
     setSourceForm({ sourceType: "card", identifier: "", assignedTo: "" });
     await loadAll();
+    setError("Fonte rimossa correttamente");
   }
 
   async function deleteSource(id: number) {
