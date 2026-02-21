@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS vehicles (
   plate TEXT NOT NULL,
   model TEXT NOT NULL,
   description TEXT,
+  ideal_consumption_km_l REAL,
+  ideal_consumption_min_km_l REAL,
+  ideal_consumption_max_km_l REAL,
   photo_key TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))

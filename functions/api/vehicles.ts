@@ -19,6 +19,8 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
           plate,
           COALESCE(NULLIF(model,''), 'Senza modello') as model,
           description,
+          ideal_consumption_min_km_l as idealConsumptionMinKmL,
+          ideal_consumption_max_km_l as idealConsumptionMaxKmL,
           photo_key as photo_key,
           (
             SELECT COUNT(*)
@@ -64,18 +66,29 @@ export const onRequestPost: PagesFunction<{ DB: D1Database }> = async ({ request
     const denied = requireRole(auth, ["admin"]);
     if (denied) return denied;
 
-    const body = (await request.json().catch(() => null)) as { code?: string; plate?: string; model?: string; description?: string } | null;
+    const body = (await request.json().catch(() => null)) as { code?: string; plate?: string; model?: string; description?: string; idealConsumptionMinKmL?: number | string | null; idealConsumptionMaxKmL?: number | string | null } | null;
     const code = String(body?.code || "").trim().toUpperCase();
     const plate = String(body?.plate || "").trim().toUpperCase();
     const model = String(body?.model || "").trim();
     const description = String(body?.description || "").trim();
+    const idealConsumptionMinRaw = Number(body?.idealConsumptionMinKmL);
+    const idealConsumptionMaxRaw = Number(body?.idealConsumptionMaxKmL);
+    const idealConsumptionMinKmL = Number.isFinite(idealConsumptionMinRaw) && idealConsumptionMinRaw > 0 ? idealConsumptionMinRaw : null;
+    const idealConsumptionMaxKmL = Number.isFinite(idealConsumptionMaxRaw) && idealConsumptionMaxRaw > 0 ? idealConsumptionMaxRaw : null;
+
+    if ((idealConsumptionMinKmL === null) !== (idealConsumptionMaxKmL === null)) {
+      return Response.json({ ok: false, error: "Inserisci sia minimo che massimo del consumo ideale" }, { status: 400 });
+    }
+    if (idealConsumptionMinKmL !== null && idealConsumptionMaxKmL !== null && idealConsumptionMaxKmL < idealConsumptionMinKmL) {
+      return Response.json({ ok: false, error: "Il consumo ideale massimo deve essere maggiore o uguale al minimo" }, { status: 400 });
+    }
 
     if (!code || !plate || !model) {
       return Response.json({ ok: false, error: "Campi obbligatori: code, plate, model" }, { status: 400 });
     }
 
-    await env.DB.prepare("INSERT INTO vehicles(code, plate, model, description, active) VALUES (?, ?, ?, ?, 1)")
-      .bind(code, plate, model, description || null)
+    await env.DB.prepare("INSERT INTO vehicles(code, plate, model, description, ideal_consumption_min_km_l, ideal_consumption_max_km_l, active) VALUES (?, ?, ?, ?, ?, ?, 1)")
+      .bind(code, plate, model, description || null, idealConsumptionMinKmL, idealConsumptionMaxKmL)
       .run();
 
     return Response.json({ ok: true });
