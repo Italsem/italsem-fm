@@ -10,6 +10,7 @@ type Vehicle = {
   plate: string;
   model: string;
   description?: string;
+  idealConsumptionKmL?: number | null;
   photo_key?: string | null;
   deadlineValid?: number;
   deadlineWarning?: number;
@@ -118,6 +119,14 @@ function deadlineState(dueDate?: string) {
   return { color: "bg-green-500", label: "Valida" };
 }
 
+function getConsumptionSignal(consumptionKmL?: number | null, idealConsumptionKmL?: number | null) {
+  if (!consumptionKmL || !idealConsumptionKmL || idealConsumptionKmL <= 0) return { color: "bg-slate-500", label: "Non valutabile" };
+  const diffRatio = Math.abs(consumptionKmL - idealConsumptionKmL) / idealConsumptionKmL;
+  if (diffRatio <= 0.1) return { color: "bg-green-500", label: "In linea" };
+  if (diffRatio <= 0.2) return { color: "bg-orange-500", label: "Da monitorare" };
+  return { color: "bg-red-500", label: "Anomalia" };
+}
+
 function quickDate(days = 30) {
   const d = new Date();
   d.setDate(d.getDate() - days);
@@ -220,14 +229,14 @@ export default function App() {
   const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "cons_desc">("date_desc");
 
   const [loginForm, setLoginForm] = useState({ username: "admin", password: "admin123" });
-  const [vehicleForm, setVehicleForm] = useState({ code: "", plate: "", model: "", description: "" });
+  const [vehicleForm, setVehicleForm] = useState({ code: "", plate: "", model: "", description: "", idealConsumptionKmL: "" });
   const [sourceForm, setSourceForm] = useState({ sourceType: "card", identifier: "", assignedTo: "" });
   const [passwordForm, setPasswordForm] = useState({ userId: 0, password: "" });
   const [newUserForm, setNewUserForm] = useState<{ username: string; password: string; role: "admin" | "technician" }>({ username: "", password: "", role: "technician" });
 
   const [modalOpen, setModalOpen] = useState(false);
   const [vehicleDetail, setVehicleDetail] = useState<VehicleDetail | null>(null);
-  const [editVehicleForm, setEditVehicleForm] = useState({ code: "", plate: "", model: "", description: "" });
+  const [editVehicleForm, setEditVehicleForm] = useState({ code: "", plate: "", model: "", description: "", idealConsumptionKmL: "" });
   const [deadlineForm, setDeadlineForm] = useState<Record<DeadlineType, string>>({ bollo: "", revisione: "", rca: "", tachigrafo: "", periodica_gru: "", strutturale: "" });
   const [enabledOptionalDeadlines, setEnabledOptionalDeadlines] = useState<DeadlineType[]>([]);
   const [excelImportFile, setExcelImportFile] = useState<File | null>(null);
@@ -303,7 +312,7 @@ export default function App() {
   async function openVehicleModal(id: number) {
     const d = await api<{ data: VehicleDetail }>(`/api/vehicles/${id}`, token);
     setVehicleDetail(d.data);
-    setEditVehicleForm({ code: d.data.vehicle.code, plate: d.data.vehicle.plate, model: d.data.vehicle.model, description: d.data.vehicle.description || "" });
+    setEditVehicleForm({ code: d.data.vehicle.code, plate: d.data.vehicle.plate, model: d.data.vehicle.model, description: d.data.vehicle.description || "", idealConsumptionKmL: d.data.vehicle.idealConsumptionKmL ? String(d.data.vehicle.idealConsumptionKmL) : "" });
     const map = { bollo: "", revisione: "", rca: "", tachigrafo: "", periodica_gru: "", strutturale: "" } as Record<DeadlineType, string>;
     d.data.deadlines.forEach((x) => { map[x.deadlineType] = x.dueDate; });
     setDeadlineForm(map);
@@ -325,7 +334,7 @@ export default function App() {
   async function addVehicle(e: FormEvent) {
     e.preventDefault();
     await api("/api/vehicles", token, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(vehicleForm) });
-    setVehicleForm({ code: "", plate: "", model: "", description: "" });
+    setVehicleForm({ code: "", plate: "", model: "", description: "", idealConsumptionKmL: "" });
     await loadAll();
   }
   async function addSource(e: FormEvent) {
@@ -798,6 +807,7 @@ export default function App() {
                   <div>
                     <div className="font-semibold">{v.code} ({v.plate})</div>
                     <div className="text-sm text-slate-300">{v.model}</div>
+                    <div className="text-xs text-slate-400">Consumo ideale: {v.idealConsumptionKmL ? `${v.idealConsumptionKmL.toFixed(2)} Km/L` : "Non impostato"}</div>
                   </div>
                 </div>
                 <div className="text-xs text-slate-400">{v.description || "Nessuna Descrizione"}</div>
@@ -811,7 +821,7 @@ export default function App() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
-            {user.role === "admin" && <form onSubmit={addVehicle} className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Nuovo Mezzo</h3><input required className="w-full rounded bg-slate-950 p-2" placeholder="Codice" value={vehicleForm.code} onChange={(e) => setVehicleForm({ ...vehicleForm, code: e.target.value })} /><input required className="w-full rounded bg-slate-950 p-2" placeholder="Targa" value={vehicleForm.plate} onChange={(e) => setVehicleForm({ ...vehicleForm, plate: e.target.value })} /><input required className="w-full rounded bg-slate-950 p-2" placeholder="Modello" value={vehicleForm.model} onChange={(e) => setVehicleForm({ ...vehicleForm, model: e.target.value })} /><input className="w-full rounded bg-slate-950 p-2" placeholder="Descrizione" value={vehicleForm.description} onChange={(e) => setVehicleForm({ ...vehicleForm, description: e.target.value })} /><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Aggiungi Mezzo</button></form>}
+            {user.role === "admin" && <form onSubmit={addVehicle} className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Nuovo Mezzo</h3><input required className="w-full rounded bg-slate-950 p-2" placeholder="Codice" value={vehicleForm.code} onChange={(e) => setVehicleForm({ ...vehicleForm, code: e.target.value })} /><input required className="w-full rounded bg-slate-950 p-2" placeholder="Targa" value={vehicleForm.plate} onChange={(e) => setVehicleForm({ ...vehicleForm, plate: e.target.value })} /><input required className="w-full rounded bg-slate-950 p-2" placeholder="Modello" value={vehicleForm.model} onChange={(e) => setVehicleForm({ ...vehicleForm, model: e.target.value })} /><input className="w-full rounded bg-slate-950 p-2" placeholder="Descrizione" value={vehicleForm.description} onChange={(e) => setVehicleForm({ ...vehicleForm, description: e.target.value })} /><input type="number" min="0.1" step="0.01" className="w-full rounded bg-slate-950 p-2" placeholder="Consumo medio ideale (Km/L)" value={vehicleForm.idealConsumptionKmL} onChange={(e) => setVehicleForm({ ...vehicleForm, idealConsumptionKmL: e.target.value })} /><button className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black">Aggiungi Mezzo</button></form>}
             
             {user.role === "admin" && <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4"><h3 className="font-semibold">Importa Scadenze Da Excel</h3><p className="text-xs text-slate-400">Colonne supportate: Targa, Revisione, Assicurazione/RCA, Bollo, Tachigrafo, Periodica Gru, Strutturale</p><input type="file" accept=".xlsx,.xls,.csv" className="w-full rounded bg-slate-950 p-2" onChange={(e) => setExcelImportFile(e.target.files?.[0] || null)} /><button type="button" disabled={!excelImportFile || excelImporting} className="rounded-lg bg-orange-500 px-3 py-2 font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50" onClick={async () => { if (!excelImportFile) return; try { await importDeadlinesFromExcel(excelImportFile); setExcelImportFile(null); } catch (err: unknown) { setError(err instanceof Error ? err.message : "Errore import Excel"); } }}>IMPORTA EXCEL</button></div>}
           </div>
@@ -856,7 +866,7 @@ export default function App() {
             </div>
           )}
 
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "cons_desc")} className="rounded bg-slate-950 p-2"><option value="date_desc">Data Desc</option><option value="date_asc">Data Asc</option><option value="cons_desc">Km/L Alto</option></select><div className="mt-2 overflow-auto"><table className="min-w-full text-sm"><thead><tr><th className="text-left">Data</th><th className="text-left">Mezzo</th><th className="text-left">Fonte</th><th className="text-left">Utilizzatore</th><th className="text-left">Km</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km Percorsi</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th>{user.role === "admin" && <th className="text-left">Azioni</th>}</tr></thead><tbody>{sortedRefuelings.map((r) => <tr key={r.id} className="border-t border-slate-800"><td>{new Date(r.refuelAt).toLocaleDateString()}</td><td>{r.vehicleCode}</td><td>{r.sourceType === "tank" ? "Cisterna" : "Carta"} / {r.sourceIdentifier}</td><td>{r.sourceAssignedTo || "-"}</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>EUR {r.amount.toFixed(2)}</td><td>{r.distanceKm ? r.distanceKm.toFixed(0) : "-"}</td><td>{r.consumptionKmL ? r.consumptionKmL.toFixed(2) : "-"}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td>{user.role === "admin" && <td><div className="flex gap-1"><button type="button" onClick={() => { void editRefueling(r); }} className="rounded bg-slate-700 px-2 py-1 text-xs">Modifica</button><button type="button" onClick={() => { void deleteRefueling(r.id); }} className="rounded bg-red-700 px-2 py-1 text-xs">Elimina</button></div></td>}</tr>)}</tbody></table></div></div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4"><select value={sortBy} onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "cons_desc")} className="rounded bg-slate-950 p-2"><option value="date_desc">Data Desc</option><option value="date_asc">Data Asc</option><option value="cons_desc">Km/L Alto</option></select><div className="mt-2 overflow-auto"><table className="min-w-full text-sm"><thead><tr><th className="text-left">Data</th><th className="text-left">Mezzo</th><th className="text-left">Fonte</th><th className="text-left">Utilizzatore</th><th className="text-left">Km</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km Percorsi</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th><th className="text-left">Stato</th>{user.role === "admin" && <th className="text-left">Azioni</th>}</tr></thead><tbody>{sortedRefuelings.map((r) => { const vehicle = vehicles.find((v) => v.id === r.vehicleId); const signal = getConsumptionSignal(r.consumptionKmL, vehicle?.idealConsumptionKmL); return <tr key={r.id} className="border-t border-slate-800"><td>{new Date(r.refuelAt).toLocaleDateString()}</td><td>{r.vehicleCode}</td><td>{r.sourceType === "tank" ? "Cisterna" : "Carta"} / {r.sourceIdentifier}</td><td>{r.sourceAssignedTo || "-"}</td><td>{r.odometerKm}</td><td>{r.liters.toFixed(2)}</td><td>EUR {r.amount.toFixed(2)}</td><td>{r.distanceKm ? r.distanceKm.toFixed(0) : "-"}</td><td>{r.consumptionKmL ? r.consumptionKmL.toFixed(2) : "-"}</td><td>{r.consumptionL100km ? r.consumptionL100km.toFixed(2) : "-"}</td><td><span className="inline-flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${signal.color}`} />{signal.label}</span></td>{user.role === "admin" && <td><div className="flex gap-1"><button type="button" onClick={() => { void editRefueling(r); }} className="rounded bg-slate-700 px-2 py-1 text-xs">Modifica</button><button type="button" onClick={() => { void deleteRefueling(r.id); }} className="rounded bg-red-700 px-2 py-1 text-xs">Elimina</button></div></td>}</tr>; })}</tbody></table></div></div>
         </section>
       )}
 
@@ -936,6 +946,8 @@ export default function App() {
                 <input className="w-full rounded bg-slate-950 p-2" value={editVehicleForm.model} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, model: e.target.value })} />
                 <label className="text-sm">Descrizione</label>
                 <textarea className="w-full rounded bg-slate-950 p-2" value={editVehicleForm.description} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, description: e.target.value })} />
+                <label className="text-sm">Consumo medio ideale (Km/L)</label>
+                <input type="number" min="0.1" step="0.01" className="w-full rounded bg-slate-950 p-2" value={editVehicleForm.idealConsumptionKmL} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, idealConsumptionKmL: e.target.value })} />
                 <div className="rounded border border-slate-700 p-3">
                   <h3 className="mb-2 font-semibold">Scadenze</h3>
                   {([...BASE_DEADLINE_TYPES, ...enabledOptionalDeadlines] as DeadlineType[]).map((t) => {
@@ -1008,7 +1020,7 @@ export default function App() {
                 <div className="mt-3 rounded border border-slate-700 p-3">
                   <div className="mb-2 flex items-center justify-between"><h3 className="font-semibold">Storico Rifornimenti</h3><div className="flex gap-2"><button type="button" onClick={exportVehicleHistoryPdf} className="rounded bg-orange-500 px-2 py-1 text-sm font-semibold text-black">PDF Consumi</button><button type="button" onClick={exportVehicleSheetPdf} className="rounded bg-slate-700 px-2 py-1 text-sm font-semibold">PDF Scheda Mezzo</button></div></div>
                   <div className="max-h-52 overflow-auto text-sm">
-                    <table className="min-w-full"><thead><tr><th className="text-left">Data</th><th className="text-left">Fonte</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km Percorsi</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th></tr></thead><tbody>{vehicleDetail.history.map((h) => <tr key={h.id} className="border-t border-slate-800"><td>{new Date(h.refuelAt).toLocaleDateString()}</td><td>{h.sourceType === "tank" ? "Cisterna" : "Carta"} / {h.sourceIdentifier || "-"}</td><td>{h.liters.toFixed(2)}</td><td>EUR {h.amount.toFixed(2)}</td><td>{h.distanceKm ? h.distanceKm.toFixed(0) : "-"}</td><td>{h.consumptionKmL ? h.consumptionKmL.toFixed(2) : "-"}</td><td>{h.consumptionL100km ? h.consumptionL100km.toFixed(2) : "-"}</td></tr>)}</tbody></table>
+                    <table className="min-w-full"><thead><tr><th className="text-left">Data</th><th className="text-left">Fonte</th><th className="text-left">Litri</th><th className="text-left">Importo</th><th className="text-left">Km Percorsi</th><th className="text-left">Km/L</th><th className="text-left">L/100Km</th><th className="text-left">Stato</th></tr></thead><tbody>{vehicleDetail.history.map((h) => { const signal = getConsumptionSignal(h.consumptionKmL, vehicleDetail.vehicle.idealConsumptionKmL); return <tr key={h.id} className="border-t border-slate-800"><td>{new Date(h.refuelAt).toLocaleDateString()}</td><td>{h.sourceType === "tank" ? "Cisterna" : "Carta"} / {h.sourceIdentifier || "-"}</td><td>{h.liters.toFixed(2)}</td><td>EUR {h.amount.toFixed(2)}</td><td>{h.distanceKm ? h.distanceKm.toFixed(0) : "-"}</td><td>{h.consumptionKmL ? h.consumptionKmL.toFixed(2) : "-"}</td><td>{h.consumptionL100km ? h.consumptionL100km.toFixed(2) : "-"}</td><td><span className="inline-flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${signal.color}`} />{signal.label}</span></td></tr>; })}</tbody></table>
                   </div>
                 </div>
               </div>

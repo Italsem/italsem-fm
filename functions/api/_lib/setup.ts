@@ -22,6 +22,9 @@ async function ensureVehicleColumns(db: D1Database) {
   if (!cols.has("created_at")) {
     await db.prepare("ALTER TABLE vehicles ADD COLUMN created_at TEXT DEFAULT (datetime('now'))").run();
   }
+  if (!cols.has("ideal_consumption_km_l")) {
+    await db.prepare("ALTER TABLE vehicles ADD COLUMN ideal_consumption_km_l REAL").run();
+  }
 
   const nameExpr = cols.has("name") ? "NULLIF(TRIM(name), '')" : "NULL";
   await db.prepare(`
@@ -30,7 +33,11 @@ async function ensureVehicleColumns(db: D1Database) {
       code = COALESCE(NULLIF(TRIM(code), ''), UPPER(TRIM(plate))),
       model = COALESCE(NULLIF(TRIM(model), ''), ${nameExpr}, 'Senza modello'),
       description = COALESCE(NULLIF(TRIM(description), ''), ${nameExpr}),
-      active = COALESCE(active, 1)
+      active = COALESCE(active, 1),
+      ideal_consumption_km_l = CASE
+        WHEN ideal_consumption_km_l IS NOT NULL AND ideal_consumption_km_l > 0 THEN ideal_consumption_km_l
+        ELSE NULL
+      END
   `).run();
 }
 
@@ -89,6 +96,7 @@ export async function ensureCoreTables(db: D1Database) {
       plate TEXT NOT NULL,
       model TEXT NOT NULL,
       description TEXT,
+      ideal_consumption_km_l REAL,
       photo_key TEXT,
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))

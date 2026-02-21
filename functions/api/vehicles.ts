@@ -19,6 +19,7 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
           plate,
           COALESCE(NULLIF(model,''), 'Senza modello') as model,
           description,
+          ideal_consumption_km_l as idealConsumptionKmL,
           photo_key as photo_key,
           (
             SELECT COUNT(*)
@@ -64,18 +65,20 @@ export const onRequestPost: PagesFunction<{ DB: D1Database }> = async ({ request
     const denied = requireRole(auth, ["admin"]);
     if (denied) return denied;
 
-    const body = (await request.json().catch(() => null)) as { code?: string; plate?: string; model?: string; description?: string } | null;
+    const body = (await request.json().catch(() => null)) as { code?: string; plate?: string; model?: string; description?: string; idealConsumptionKmL?: number | string | null } | null;
     const code = String(body?.code || "").trim().toUpperCase();
     const plate = String(body?.plate || "").trim().toUpperCase();
     const model = String(body?.model || "").trim();
     const description = String(body?.description || "").trim();
+    const idealConsumptionRaw = Number(body?.idealConsumptionKmL);
+    const idealConsumptionKmL = Number.isFinite(idealConsumptionRaw) && idealConsumptionRaw > 0 ? idealConsumptionRaw : null;
 
     if (!code || !plate || !model) {
       return Response.json({ ok: false, error: "Campi obbligatori: code, plate, model" }, { status: 400 });
     }
 
-    await env.DB.prepare("INSERT INTO vehicles(code, plate, model, description, active) VALUES (?, ?, ?, ?, 1)")
-      .bind(code, plate, model, description || null)
+    await env.DB.prepare("INSERT INTO vehicles(code, plate, model, description, ideal_consumption_km_l, active) VALUES (?, ?, ?, ?, ?, 1)")
+      .bind(code, plate, model, description || null, idealConsumptionKmL)
       .run();
 
     return Response.json({ ok: true });
