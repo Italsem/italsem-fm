@@ -18,7 +18,8 @@ type VehicleRow = {
   description: string | null;
   active: number;
   photo_key: string | null;
-  idealConsumptionKmL: number | null;
+  idealConsumptionMinKmL: number | null;
+  idealConsumptionMaxKmL: number | null;
 };
 
 export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request, env, params }) => {
@@ -31,7 +32,7 @@ export const onRequestGet: PagesFunction<{ DB: D1Database }> = async ({ request,
   if (!id) return Response.json({ ok: false, error: "ID Non Valido" }, { status: 400 });
 
   const vehicle = await env.DB
-    .prepare("SELECT id, code, plate, model, description, active, photo_key, ideal_consumption_km_l as idealConsumptionKmL FROM vehicles WHERE id = ?")
+    .prepare("SELECT id, code, plate, model, description, active, photo_key, ideal_consumption_min_km_l as idealConsumptionMinKmL, ideal_consumption_max_km_l as idealConsumptionMaxKmL FROM vehicles WHERE id = ?")
     .bind(id)
     .first<VehicleRow>();
 
@@ -108,13 +109,22 @@ export const onRequestPatch: PagesFunction<{ DB: D1Database }> = async ({ reques
   const id = Number(params.id);
   if (!id) return Response.json({ ok: false, error: "ID Non Valido" }, { status: 400 });
 
-  const body = (await request.json().catch(() => null)) as { code?: string; plate?: string; model?: string; description?: string; idealConsumptionKmL?: number | string | null } | null;
+  const body = (await request.json().catch(() => null)) as { code?: string; plate?: string; model?: string; description?: string; idealConsumptionMinKmL?: number | string | null; idealConsumptionMaxKmL?: number | string | null } | null;
   const code = String(body?.code || "").trim().toUpperCase();
   const plate = String(body?.plate || "").trim().toUpperCase();
   const model = String(body?.model || "").trim();
   const description = String(body?.description || "").trim();
-  const idealConsumptionRaw = Number(body?.idealConsumptionKmL);
-  const idealConsumptionKmL = Number.isFinite(idealConsumptionRaw) && idealConsumptionRaw > 0 ? idealConsumptionRaw : null;
+  const idealConsumptionMinRaw = Number(body?.idealConsumptionMinKmL);
+  const idealConsumptionMaxRaw = Number(body?.idealConsumptionMaxKmL);
+  const idealConsumptionMinKmL = Number.isFinite(idealConsumptionMinRaw) && idealConsumptionMinRaw > 0 ? idealConsumptionMinRaw : null;
+  const idealConsumptionMaxKmL = Number.isFinite(idealConsumptionMaxRaw) && idealConsumptionMaxRaw > 0 ? idealConsumptionMaxRaw : null;
+
+  if ((idealConsumptionMinKmL === null) !== (idealConsumptionMaxKmL === null)) {
+    return Response.json({ ok: false, error: "Inserisci sia minimo che massimo del consumo ideale" }, { status: 400 });
+  }
+  if (idealConsumptionMinKmL !== null && idealConsumptionMaxKmL !== null && idealConsumptionMaxKmL < idealConsumptionMinKmL) {
+    return Response.json({ ok: false, error: "Il consumo ideale massimo deve essere maggiore o uguale al minimo" }, { status: 400 });
+  }
 
   if (!code || !plate || !model) {
     return Response.json({ ok: false, error: "Campi obbligatori: Codice, Targa, Modello" }, { status: 400 });
@@ -125,8 +135,8 @@ export const onRequestPatch: PagesFunction<{ DB: D1Database }> = async ({ reques
     return Response.json({ ok: false, error: "Mezzo Non Trovato" }, { status: 404 });
   }
 
-  await env.DB.prepare("UPDATE vehicles SET code = ?, plate = ?, model = ?, description = ?, ideal_consumption_km_l = ? WHERE id = ?")
-    .bind(code, plate, model, description || null, idealConsumptionKmL, id)
+  await env.DB.prepare("UPDATE vehicles SET code = ?, plate = ?, model = ?, description = ?, ideal_consumption_min_km_l = ?, ideal_consumption_max_km_l = ? WHERE id = ?")
+    .bind(code, plate, model, description || null, idealConsumptionMinKmL, idealConsumptionMaxKmL, id)
     .run();
   return Response.json({ ok: true });
 };
