@@ -54,3 +54,28 @@ E presente una GitHub Action (`.github/workflows/build-check.yml`) che esegue au
 - `npm run build`
 
 cosi eventuali regressioni di build vengono bloccate prima della distribuzione.
+
+
+## Alert automatici email per scadenze
+
+E possibile inviare alert email automatici per le scadenze dei mezzi tramite endpoint API:
+
+- `GET /api/alerts/deadlines?days=30` → anteprima delle scadenze nel periodo
+- `POST /api/alerts/deadlines?days=30` → invio email riepilogo scadenze
+
+Requisiti:
+
+- autenticazione con utente `admin`
+- variabili ambiente su Cloudflare Pages:
+  - `ALERT_EMAIL_TO` (obbligatoria, una o piu email separate da virgola)
+  - `ALERT_EMAIL_FROM` (opzionale, default `alert@italsem-fm.local`)
+  - `ALERT_EMAIL_SUBJECT` (opzionale)
+
+Esempio chiamata:
+
+```bash
+curl -X POST "https://<tuo-dominio>/api/alerts/deadlines?days=30" \
+  -H "Authorization: Bearer <TOKEN_ADMIN>"
+```
+
+Per automatizzare il processo, configura un cron esterno (es. GitHub Actions schedule, cron server, Zapier/Make) che chiami il `POST` giornalmente.
